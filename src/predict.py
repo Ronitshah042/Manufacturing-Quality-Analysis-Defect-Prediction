@@ -1,19 +1,18 @@
 """
-Manufacturing Defect Prediction Script
-======================================
-Loads the serialized Scikit-learn pipeline (median imputer + model)
-and predicts whether a manufactured part passes or fails quality inspection
-based on weight (g) and length (mm).
+Manufacturing Quality & Predictive Maintenance Inference Script
+===============================================================
+Loads the serialized Scikit-learn pipeline and predicts machine failure
+risk from the UCI AI4I 2020 sensor columns (Track 1). Note: AI4I 2020 is a
+synthetic benchmark published by UCI, not logs from a real factory.
 
 Usage Examples:
 ---------------
 1. Run built-in demonstration cases:
    python3 src/predict.py
 
-2. Predict for custom measurements via CLI:
-   python3 src/predict.py --weight 250.2 --length 100.04
-   python3 src/predict.py --weight 262.3 --length 100.41
-   python3 src/predict.py --length 100.02  # Missing weight (handled by imputer)
+2. Predict custom machine telemetry via CLI:
+   python3 src/predict.py --air_temp 298.1 --process_temp 308.6 --rpm 1551 --torque 42.8 --tool_wear 120
+   python3 src/predict.py --air_temp 303.5 --process_temp 313.2 --rpm 1380 --torque 68.5 --tool_wear 225
 """
 
 import argparse
@@ -25,9 +24,9 @@ import pandas as pd
 
 # Support execution both as script and module
 try:
-    from src.pipeline import FEATURE_NAMES
+    from src.pipeline import TELEMETRY_FEATURES
 except ModuleNotFoundError:
-    from pipeline import FEATURE_NAMES
+    from pipeline import TELEMETRY_FEATURES
 
 DEFAULT_MODEL_PATH = "models/defect_pipeline.joblib"
 
@@ -45,22 +44,30 @@ def load_model(model_path: str = DEFAULT_MODEL_PATH):
     return joblib.load(path)
 
 
-def predict_defect(
-    weight_g: Optional[Union[float, int]],
-    length_mm: Union[float, int],
+def predict_machine_failure(
+    air_temperature_k: float,
+    process_temperature_k: float,
+    rotational_speed_rpm: float,
+    torque_nm: float,
+    tool_wear_min: float,
     pipeline=None,
     model_path: str = DEFAULT_MODEL_PATH,
 ) -> Dict[str, Any]:
     """
-    Predict defect status for a single manufactured part.
+    Predict machine failure risk from the five AI4I 2020 sensor columns.
 
     Parameters
     ----------
-    weight_g : float or None
-        Measured part weight in grams. If None or NaN, the pipeline's
-        SimpleImputer will impute using the training set median.
-    length_mm : float
-        Measured part length in millimeters.
+    air_temperature_k : float
+        Ambient air temperature in Kelvin.
+    process_temperature_k : float
+        Cutting process temperature in Kelvin.
+    rotational_speed_rpm : float
+        Spindle rotational speed in RPM.
+    torque_nm : float
+        Cutting torque in Newton-meters (N*m).
+    tool_wear_min : float
+        Cumulative tool wear in minutes.
     pipeline : sklearn.pipeline.Pipeline, optional
         Preloaded pipeline. If None, loaded from `model_path`.
     model_path : str, default='models/defect_pipeline.joblib'
@@ -69,60 +76,96 @@ def predict_defect(
     Returns
     -------
     dict
-        Dictionary containing prediction results:
-        - 'defective': bool (True = Defective, False = Passed)
-        - 'status': 'DEFECTIVE' or 'PASSED QA'
-        - 'defect_probability': float (if predict_proba available, else None)
-        - 'input': dict of input features
+        Prediction results including boolean flag, status string, probability, and inputs.
     """
     if pipeline is None:
         pipeline = load_model(model_path)
 
-    # Prepare single-row DataFrame with explicit feature column names
     input_data = pd.DataFrame(
-        [{"weight_g": np.nan if weight_g is None else float(weight_g), "length_mm": float(length_mm)}],
-        columns=FEATURE_NAMES,
+        [{
+            "air_temperature_k": float(air_temperature_k),
+            "process_temperature_k": float(process_temperature_k),
+            "rotational_speed_rpm": float(rotational_speed_rpm),
+            "torque_nm": float(torque_nm),
+            "tool_wear_min": float(tool_wear_min),
+        }],
+        columns=TELEMETRY_FEATURES,
     )
 
     pred_raw = pipeline.predict(input_data)[0]
-    is_defective = bool(pred_raw)
+    is_failure = bool(pred_raw == 1)
 
-    # Estimate probability if classifier provides predict_proba
-    prob_defect = None
+    prob_failure = None
     if hasattr(pipeline, "predict_proba"):
         probs = pipeline.predict_proba(input_data)[0]
-        # In scikit-learn, classes_ order determines column indexing
         classes = list(pipeline.classes_)
-        if True in classes:
-            idx = classes.index(True)
-            prob_defect = float(probs[idx])
+        if 1 in classes:
+            prob_failure = float(probs[classes.index(1)])
+        elif True in classes:
+            prob_failure = float(probs[classes.index(True)])
 
     return {
-        "defective": is_defective,
-        "status": "DEFECTIVE" if is_defective else "PASSED QA",
-        "defect_probability": prob_defect,
+        "failure": is_failure,
+        "status": "MACHINE FAILURE RISK" if is_failure else "NORMAL OPERATION",
+        "failure_probability": prob_failure,
         "input": {
-            "weight_g": weight_g,
-            "length_mm": length_mm,
+            "air_temperature_k": air_temperature_k,
+            "process_temperature_k": process_temperature_k,
+            "rotational_speed_rpm": rotational_speed_rpm,
+            "torque_nm": torque_nm,
+            "tool_wear_min": tool_wear_min,
         },
     }
 
 
+def predict_defect(*args, **kwargs):
+    """
+    Deprecated alias kept so old imports do not break.
+
+    Accepts the same telemetry keyword arguments as predict_machine_failure().
+    The old (weight_g, length_mm) signature is no longer supported: the saved
+    model is trained on sensor columns, and there is no valid way to convert
+    part dimensions into sensor readings.
+    """
+    if args or "weight_g" in kwargs or "length_mm" in kwargs:
+        raise TypeError(
+            "predict_defect(weight_g, length_mm) is no longer supported. "
+            "The model predicts machine failure from sensor telemetry; call "
+            "predict_machine_failure(air_temperature_k=..., process_temperature_k=..., "
+            "rotational_speed_rpm=..., torque_nm=..., tool_wear_min=...) instead."
+        )
+    return predict_machine_failure(**kwargs)
+
+
 def run_demo_predictions(pipeline=None):
     """
-    Run demonstration predictions across realistic manufacturing scenarios.
+    Run demonstration predictions across realistic industrial operating scenarios.
     """
-    print("\n" + "=" * 70)
-    print(" MANUFACTURING QUALITY INSPECTOR: DEMONSTRATION RUN")
-    print("=" * 70)
+    print("\n" + "=" * 76)
+    print(" PREDICTIVE MAINTENANCE INSPECTOR: INDUSTRIAL SCENARIOS RUN")
+    print("=" * 76)
 
     test_cases = [
-        {"desc": "Nominal compliant part", "weight": 250.2, "length": 100.04},
-        {"desc": "In-spec slightly light part", "weight": 249.4, "length": 99.95},
-        {"desc": "Defective: oversized length", "weight": 262.3, "length": 100.41},
-        {"desc": "Defective: undersized length", "weight": 239.1, "length": 99.68},
-        {"desc": "Missing weight sensor reading", "weight": None, "length": 100.03},
-        {"desc": "Severe overweight anomaly", "weight": 275.0, "length": 100.35},
+        {
+            "desc": "Nominal milling operation",
+            "air": 298.2, "proc": 308.7, "rpm": 1500, "torque": 40.0, "wear": 40,
+        },
+        {
+            "desc": "Fresh cutting tool, moderate cut",
+            "air": 299.1, "proc": 309.4, "rpm": 1620, "torque": 35.5, "wear": 12,
+        },
+        {
+            "desc": "Critical tool wear breakdown (TWF)",
+            "air": 300.4, "proc": 310.8, "rpm": 1410, "torque": 52.0, "wear": 235,
+        },
+        {
+            "desc": "Overstrain cutting load (OSF)",
+            "air": 301.2, "proc": 311.5, "rpm": 1280, "torque": 69.8, "wear": 195,
+        },
+        {
+            "desc": "Heat dissipation failure (HDF: ΔT < 8.6K, RPM < 1380)",
+            "air": 302.5, "proc": 310.4, "rpm": 1340, "torque": 55.0, "wear": 180,
+        },
     ]
 
     if pipeline is None:
@@ -130,70 +173,79 @@ def run_demo_predictions(pipeline=None):
 
     results = []
     for case in test_cases:
-        res = predict_defect(case["weight"], case["length"], pipeline=pipeline)
-        prob_str = f"{res['defect_probability']*100:.0f}%" if res["defect_probability"] is not None else "N/A"
+        res = predict_machine_failure(
+            air_temperature_k=case["air"],
+            process_temperature_k=case["proc"],
+            rotational_speed_rpm=case["rpm"],
+            torque_nm=case["torque"],
+            tool_wear_min=case["wear"],
+            pipeline=pipeline,
+        )
+        prob_str = f"{res['failure_probability']*100:.1f}%" if res["failure_probability"] is not None else "N/A"
         results.append({
-            "Scenario": case["desc"],
-            "Weight (g)": f"{case['weight']:.1f}" if case["weight"] is not None else "MISSING (NaN)",
-            "Length (mm)": f"{case['length']:.2f}",
+            "Operating Scenario": case["desc"],
+            "RPM": case["rpm"],
+            "Torque": f"{case['torque']:.1f} Nm",
+            "Tool Wear": f"{case['wear']} min",
             "Status": res["status"],
-            "Defect Prob": prob_str,
+            "Failure Prob": prob_str,
         })
 
     demo_df = pd.DataFrame(results)
     print(demo_df.to_string(index=False))
-    print("=" * 70)
-    print("Note: The 'MISSING (NaN)' weight was automatically imputed using the training median.")
-    print("      Run with --help to see how to predict custom measurements via CLI.")
+    print("=" * 76)
+    print("Model trained on the UCI AI4I 2020 synthetic predictive-maintenance benchmark.")
+    print("Run with --help to see how to predict custom sensor readings via CLI.")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Predict manufacturing defect status from part weight and length."
+        description="Predict machine failure risk from industrial sensor telemetry."
     )
-    parser.add_argument(
-        "--weight",
-        type=float,
-        default=None,
-        help="Part weight in grams (e.g. 250.5). If omitted, median imputation will be used.",
-    )
-    parser.add_argument(
-        "--length",
-        type=float,
-        default=None,
-        help="Part length in millimeters (e.g. 100.05).",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default=DEFAULT_MODEL_PATH,
-        help=f"Path to saved pipeline (default: {DEFAULT_MODEL_PATH}).",
-    )
+    parser.add_argument("--air_temp", type=float, default=None, help="Air temperature in Kelvin (e.g. 298.5)")
+    parser.add_argument("--process_temp", type=float, default=None, help="Process temperature in Kelvin (e.g. 308.7)")
+    parser.add_argument("--rpm", type=float, default=None, help="Rotational speed in RPM (e.g. 1500)")
+    parser.add_argument("--torque", type=float, default=None, help="Torque in Nm (e.g. 40.5)")
+    parser.add_argument("--tool_wear", type=float, default=None, help="Tool wear in minutes (e.g. 120)")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help=f"Path to saved model (default: {DEFAULT_MODEL_PATH})")
 
     args = parser.parse_args()
 
     # If no arguments provided, run demo mode
-    if args.length is None and args.weight is None:
+    if all(v is None for v in [args.air_temp, args.process_temp, args.rpm, args.torque, args.tool_wear]):
         run_demo_predictions()
         return
 
-    if args.length is None:
-        parser.error("The --length argument is required when running single-part predictions.")
+    # Default fallback values for omitted arguments.
+    # Use `is None` (not `or`) so that a valid 0 (e.g. --tool_wear 0) is kept.
+    def _default(value, fallback):
+        return fallback if value is None else value
 
-    result = predict_defect(
-        weight_g=args.weight,
-        length_mm=args.length,
+    air = _default(args.air_temp, 300.0)
+    proc = _default(args.process_temp, 310.0)
+    rpm = _default(args.rpm, 1500.0)
+    torque = _default(args.torque, 40.0)
+    wear = _default(args.tool_wear, 100.0)
+
+    res = predict_machine_failure(
+        air_temperature_k=air,
+        process_temperature_k=proc,
+        rotational_speed_rpm=rpm,
+        torque_nm=torque,
+        tool_wear_min=wear,
         model_path=args.model,
     )
 
-    weight_disp = f"{result['input']['weight_g']} g" if result['input']['weight_g'] is not None else "None (Imputed)"
-    print("\n--- Manufacturing Quality Inspection Result ---")
-    print(f"Input Weight:       {weight_disp}")
-    print(f"Input Length:       {result['input']['length_mm']} mm")
-    print(f"Inspection Result:  {result['status']}")
-    print(f"Defective Flag:     {result['defective']}")
-    if result["defect_probability"] is not None:
-        print(f"Defect Probability: {result['defect_probability'] * 100:.1f}%")
+    print("\n--- Predictive Maintenance Inspection Result ---")
+    print(f"Air Temperature:     {air:.1f} K")
+    print(f"Process Temperature: {proc:.1f} K")
+    print(f"Rotational Speed:    {rpm:.0f} RPM")
+    print(f"Spindle Torque:      {torque:.1f} Nm")
+    print(f"Tool Wear Duration:  {wear:.0f} min")
+    print(f"Operation Status:    {res['status']}")
+    print(f"Failure Flag:        {res['failure']}")
+    if res["failure_probability"] is not None:
+        print(f"Failure Probability: {res['failure_probability'] * 100:.1f}%")
     print("------------------------------------------------\n")
 
 

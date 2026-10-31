@@ -1,13 +1,14 @@
 """
-Unit Tests for Manufacturing Defect Prediction Pipeline
-======================================================
+Unit Tests for Track 1 Telemetry Pipeline & Predictive Maintenance
+==================================================================
 Tests:
-1. Pipeline composition and step naming.
+1. Pipeline composition (imputer, scaler, classifier).
 2. Missing value imputation behavior with SimpleImputer(strategy='median').
-3. Deduplication and feature selection in data loader.
-4. Model training, fitting, and prediction.
-5. Model serialization to disk and reload consistency.
-6. Single-item prediction function behavior (including missing inputs).
+3. Data loader telemetry feature extraction and deduplication.
+4. Model serialization to disk and reload consistency.
+5. Machine failure prediction function behavior.
+6. Train and test accuracy calculation in evaluate_model.
+7. Backward compatibility for predict_defect.
 """
 
 import tempfile
@@ -18,95 +19,103 @@ import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
-from src.pipeline import FEATURE_NAMES, create_pipeline, load_and_clean_data
-from src.predict import predict_defect
+from src.pipeline import (
+    TELEMETRY_FEATURES,
+    TELEMETRY_TARGET,
+    create_pipeline,
+    load_and_clean_data,
+)
+from src.predict import predict_defect, predict_machine_failure
+from src.train import evaluate_model
 
 
 class TestManufacturingPipeline(unittest.TestCase):
 
     def setUp(self):
-        # Small synthetic dataset mimicking manufacturing dimensions
-        self.sample_data = pd.DataFrame({
-            "product_id": ["PART-A", "PART-B", "PART-C", "PART-D"],
-            "weight_g": [250.0, np.nan, 260.0, 240.0],
+        # Small sample dataset using the Track 1 telemetry schema
+        self.sample_telemetry = pd.DataFrame({
+            "product_id": ["PART-0001", "PART-0002", "PART-0003", "PART-0004"],
+            "air_temperature_k": [298.1, 298.2, 303.5, np.nan],
+            "process_temperature_k": [308.6, 308.7, 313.2, 308.5],
+            "rotational_speed_rpm": [1551, 1408, 1380, 1500],
+            "torque_nm": [42.8, 46.3, 68.5, 40.0],
+            "tool_wear_min": [0, 3, 225, 50],
+            "source_machine_failure": [0, 0, 1, 0],
+            "defective": [False, False, True, False],
+            "weight_g": [250.0, 251.0, 260.0, 240.0],
             "length_mm": [100.0, 100.05, 100.4, 99.6],
-            "width_mm": [50.0, 50.0, 50.2, 49.8],
-            "height_mm": [25.0, 25.0, 25.1, 24.9],
-            "tolerance_deviation_mm": [0.0, 0.05, 0.4, -0.4],
-            "defective": [False, False, True, True],
         })
 
     def test_pipeline_structure(self):
-        """Pipeline should contain 'imputer' (SimpleImputer) and 'classifier'."""
+        """Pipeline should contain 'imputer', 'scaler', and 'classifier'."""
         pipe = create_pipeline()
         self.assertIsInstance(pipe, Pipeline)
         self.assertIn("imputer", pipe.named_steps)
+        self.assertIn("scaler", pipe.named_steps)
         self.assertIn("classifier", pipe.named_steps)
         self.assertIsInstance(pipe.named_steps["imputer"], SimpleImputer)
-        self.assertEqual(pipe.named_steps["imputer"].strategy, "median")
+        self.assertIsInstance(pipe.named_steps["scaler"], StandardScaler)
         self.assertIsInstance(pipe.named_steps["classifier"], DecisionTreeClassifier)
 
     def test_missing_value_imputation(self):
-        """Imputer must fill missing weight values with the median of training data."""
+        """Imputer must fill missing telemetry sensor values with median."""
         X_train = pd.DataFrame({
-            "weight_g": [248.0, 250.0, 252.0],  # Median is 250.0
-            "length_mm": [100.0, 100.0, 100.0],
+            "air_temperature_k": [298.0, 300.0, 302.0],  # Median = 300.0
+            "process_temperature_k": [308.0, 310.0, 312.0],
+            "rotational_speed_rpm": [1400.0, 1500.0, 1600.0],
+            "torque_nm": [35.0, 40.0, 45.0],
+            "tool_wear_min": [50.0, 100.0, 150.0],
         })
-        y_train = pd.Series([False, False, False])
+        y_train = pd.Series([0, 0, 1])
 
-        pipe = create_pipeline()
+        pipe = create_pipeline(random_state=42)
         pipe.fit(X_train, y_train)
 
-        # Imputer statistics check
+        # Imputer check
         imputer = pipe.named_steps["imputer"]
-        self.assertEqual(imputer.statistics_[0], 250.0)
+        self.assertEqual(imputer.statistics_[0], 300.0)
 
-        # Test prediction on a sample containing NaN for weight_g
+        # Test prediction on NaN sample
         X_test = pd.DataFrame({
-            "weight_g": [np.nan],
-            "length_mm": [100.0],
+            "air_temperature_k": [np.nan],
+            "process_temperature_k": [310.0],
+            "rotational_speed_rpm": [1500.0],
+            "torque_nm": [40.0],
+            "tool_wear_min": [100.0],
         })
         pred = pipe.predict(X_test)
         self.assertEqual(len(pred), 1)
 
-    def test_data_loader_features_and_deduplication(self):
-        """DataLoader must remove duplicates and exclude product_id & tolerance_deviation_mm."""
+    def test_data_loader_telemetry_features_and_deduplication(self):
+        """DataLoader must extract TELEMETRY_FEATURES and remove duplicates."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
             tmp_path = tmp.name
-            # Write with one duplicate row
-            self.sample_data.to_csv(tmp_path, index=False)
+            self.sample_telemetry.to_csv(tmp_path, index=False)
+            # Append duplicate
             with open(tmp_path, "a") as f:
-                # Add duplicate of PART-A
-                f.write("PART-A,250.0,100.0,50.0,25.0,0.0,False\n")
+                f.write("PART-0001,298.1,308.6,1551,42.8,0,0,False,250.0,100.0\n")
 
         try:
-            X, y = load_and_clean_data(tmp_path)
-            # Should have deduplicated: 4 unique rows
+            X, y = load_and_clean_data(tmp_path, feature_set="telemetry")
+            # 4 unique rows
             self.assertEqual(len(X), 4)
             self.assertEqual(len(y), 4)
-
-            # Features should only be weight_g and length_mm
-            self.assertListEqual(list(X.columns), FEATURE_NAMES)
-            self.assertNotIn("product_id", X.columns)
-            self.assertNotIn("tolerance_deviation_mm", X.columns)
-            self.assertNotIn("width_mm", X.columns)
-            self.assertNotIn("height_mm", X.columns)
-
-            # Target type should be boolean
-            self.assertEqual(y.dtype, bool)
+            self.assertListEqual(list(X.columns), TELEMETRY_FEATURES)
+            self.assertEqual(y.name, TELEMETRY_TARGET)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
     def test_pipeline_serialization_and_reload(self):
-        """Fitted pipeline saved with joblib should reload and predict identically."""
-        X = self.sample_data[FEATURE_NAMES]
-        y = self.sample_data["defective"].astype(bool)
+        """Pipeline serialized with joblib must reload and predict identically."""
+        X = self.sample_telemetry[TELEMETRY_FEATURES]
+        y = self.sample_telemetry[TELEMETRY_TARGET]
 
         pipe = create_pipeline(random_state=42)
         pipe.fit(X, y)
-        original_preds = pipe.predict(X)
+        orig_preds = pipe.predict(X)
 
         with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as tmp:
             tmp_model_path = tmp.name
@@ -115,56 +124,107 @@ class TestManufacturingPipeline(unittest.TestCase):
             joblib.dump(pipe, tmp_model_path)
             reloaded_pipe = joblib.load(tmp_model_path)
             reloaded_preds = reloaded_pipe.predict(X)
-            np.testing.assert_array_equal(original_preds, reloaded_preds)
+            np.testing.assert_array_equal(orig_preds, reloaded_preds)
         finally:
             Path(tmp_model_path).unlink(missing_ok=True)
 
-    def test_predict_defect_function(self):
-        """predict_defect helper function should return correct structure and handle missing weight."""
-        X = self.sample_data[FEATURE_NAMES]
-        y = self.sample_data["defective"].astype(bool)
+    def test_predict_machine_failure_function(self):
+        """predict_machine_failure should output structured status and probability."""
+        X = self.sample_telemetry[TELEMETRY_FEATURES]
+        y = self.sample_telemetry[TELEMETRY_TARGET]
 
         pipe = create_pipeline(random_state=42)
         pipe.fit(X, y)
 
-        # 1. Normal compliant part
-        result_pass = predict_defect(weight_g=250.0, length_mm=100.0, pipeline=pipe)
-        self.assertIn("defective", result_pass)
-        self.assertIn("status", result_pass)
-        self.assertIsInstance(result_pass["defective"], bool)
+        # Nominal operating machine
+        res_normal = predict_machine_failure(
+            air_temperature_k=298.1,
+            process_temperature_k=308.6,
+            rotational_speed_rpm=1551,
+            torque_nm=42.8,
+            tool_wear_min=0,
+            pipeline=pipe,
+        )
+        self.assertIn("failure", res_normal)
+        self.assertIn("status", res_normal)
+        self.assertFalse(res_normal["failure"])
+        self.assertEqual(res_normal["status"], "NORMAL OPERATION")
 
-        # 2. Part with missing weight (None)
-        result_missing_weight = predict_defect(weight_g=None, length_mm=100.0, pipeline=pipe)
-        self.assertFalse(result_missing_weight["defective"])
-        self.assertEqual(result_missing_weight["status"], "PASSED QA")
+        # Critical breakdown machine
+        res_fail = predict_machine_failure(
+            air_temperature_k=303.5,
+            process_temperature_k=313.2,
+            rotational_speed_rpm=1380,
+            torque_nm=68.5,
+            tool_wear_min=225,
+            pipeline=pipe,
+        )
+        self.assertTrue(res_fail["failure"])
+        self.assertEqual(res_fail["status"], "MACHINE FAILURE RISK")
 
-    def test_predict_defect_edge_cases(self):
-        """Test prediction output labels for boundary, defect, and nominal cases."""
-        X, y = load_and_clean_data("manufacturing_samples.csv")
+    def test_evaluate_model_training_and_test_accuracy(self):
+        """evaluate_model must accurately compute both training and test accuracy."""
+        X_train = pd.DataFrame({
+            "air_temperature_k": [298.0, 298.2, 303.0, 304.0],
+            "process_temperature_k": [308.0, 308.5, 313.0, 314.0],
+            "rotational_speed_rpm": [1500, 1520, 1350, 1300],
+            "torque_nm": [40.0, 42.0, 65.0, 70.0],
+            "tool_wear_min": [10, 20, 220, 240],
+        })
+        y_train = pd.Series([0, 0, 1, 1])
+
+        X_test = pd.DataFrame({
+            "air_temperature_k": [298.1, 303.5],
+            "process_temperature_k": [308.2, 313.5],
+            "rotational_speed_rpm": [1510, 1340],
+            "torque_nm": [41.0, 68.0],
+            "tool_wear_min": [15, 230],
+        })
+        y_test = pd.Series([0, 1])
+
+        pipe = create_pipeline(random_state=42)
+        pipe.fit(X_train, y_train)
+
+        metrics = evaluate_model(
+            "Telemetry Model",
+            pipe,
+            X_test,
+            y_test,
+            X_train=X_train,
+            y_train=y_train,
+        )
+
+        self.assertIn("train_accuracy", metrics)
+        self.assertIn("test_accuracy", metrics)
+        self.assertEqual(metrics["train_accuracy"], 1.0)
+        self.assertEqual(metrics["test_accuracy"], 1.0)
+
+    def test_backward_compatible_predict_defect(self):
+        """predict_defect forwards telemetry kwargs and rejects the old weight/length signature."""
+        X = self.sample_telemetry[TELEMETRY_FEATURES]
+        y = self.sample_telemetry[TELEMETRY_TARGET]
+
         pipe = create_pipeline(random_state=42)
         pipe.fit(X, y)
 
-        # Compliant nominal part
-        nominal = predict_defect(250.2, 100.04, pipeline=pipe)
-        self.assertFalse(nominal["defective"])
-        self.assertEqual(nominal["status"], "PASSED QA")
+        # Telemetry kwargs are forwarded unchanged to predict_machine_failure
+        res = predict_defect(
+            air_temperature_k=298.1,
+            process_temperature_k=308.6,
+            rotational_speed_rpm=1551,
+            torque_nm=42.8,
+            tool_wear_min=0,
+            pipeline=pipe,
+        )
+        self.assertIn("failure", res)
+        self.assertIn("status", res)
 
-        # Oversized defective part
-        oversized = predict_defect(262.3, 100.41, pipeline=pipe)
-        self.assertTrue(oversized["defective"])
-        self.assertEqual(oversized["status"], "DEFECTIVE")
-
-        # Undersized defective part
-        undersized = predict_defect(239.1, 99.68, pipeline=pipe)
-        self.assertTrue(undersized["defective"])
-        self.assertEqual(undersized["status"], "DEFECTIVE")
-
-        # Missing sensor weight with compliant length
-        missing_w = predict_defect(None, 100.03, pipeline=pipe)
-        self.assertFalse(missing_w["defective"])
-        self.assertEqual(missing_w["status"], "PASSED QA")
+        # Old dimensional signature must fail loudly, not invent sensor values
+        with self.assertRaises(TypeError):
+            predict_defect(weight_g=250.0, length_mm=100.0, pipeline=pipe)
+        with self.assertRaises(TypeError):
+            predict_defect(250.0, 100.0)
 
 
 if __name__ == "__main__":
     unittest.main()
-
