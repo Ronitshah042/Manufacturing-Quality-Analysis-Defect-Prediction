@@ -71,15 +71,24 @@ These scores show how well a tree can recover the generator's thresholds. They s
 
 According to UCI's documentation, `Machine failure = 1` when **any** of these fires:
 
-| Mode | UCI rule | Inputs available to Track 1? |
-| :--- | :--- | :--- |
-| HDF | air–process ΔT < 8.6 K **and** rpm < 1380 | Yes (all three) |
-| PWF | power = torque × rpm·2π/60 outside 3500–9000 W | Yes |
-| OSF | tool_wear × torque > 11,000 / 12,000 / 13,000 min·Nm for Type L / M / H | Partly. **`Type` is dropped** |
-| TWF | tool replaced or fails at a random wear time between 200–240 min | Partly. Random component |
-| RNF | 0.1% random failure regardless of inputs | No. Pure noise |
+| Mode | UCI rule | Inputs available to Track 1? | Empirical check in `manufacturing_samples.csv` |
+| :--- | :--- | :--- | :--- |
+| **PWF** | Power $P = \tau \cdot \omega$ outside $3500 - 9000\text{ W}$ | Yes | **100% deterministic**: exactly 37 rows have $P < 3500\text{ W}$ or $P > 9000\text{ W}$, and all 37 (100%) are labelled failures. |
+| **HDF** | air–process $\Delta T < 8.6\text{ K}$ **and** $\text{rpm} < 1380$ | Yes (all three) | **100% deterministic**: exactly 49 rows meet this condition, and all 49 (100%) are labelled failures. |
+| **OSF** | $\text{tool\_wear} \times \text{torque} > 11,000 / 12,000 / 13,000\text{ min}\cdot\text{Nm}$ | Partly. **`Type` is dropped** | All 35 OSF failures have $\text{tool\_wear} \times \text{torque} \ge 11,003\text{ min}\cdot\text{Nm}$. |
+| **TWF** | Replaced or fails at random wear between $200 - 240\text{ min}$ | Partly. **Stochastic component** | **Non-monotonic**: All 24 TWF failures fall in $200 - 235\text{ min}$, but 47 of the 110 total rows with wear $\ge 200\text{ min}$ run normally. |
+| **RNF** | 0.1% random failure regardless of inputs | No. Pure noise | Random unmodelled failure noise. |
 
-So Track 1 is also learning a hand-written rule system. Most of the failure signal (HDF, PWF, most of OSF) is a deterministic function of the five features. That is why tree models do well. The remaining errors come mostly from the dropped `Type` column, the random parts of TWF/RNF, and the limited training data (120 failures). They do not come from real-world sensor noise.
+#### Empirical Verification of Power and Tool Wear Rules:
+1. **Power Failure is Not a Correlative Assumption**:
+   - Power $P = \tau \cdot \omega = \text{Torque} \times (\text{RPM} \times \frac{2\pi}{60})$ is not just correlated with failure; it defines an exact hard boundary.
+   - In our 1,000-sample dataset, exactly 37 rows fall outside $[3500\text{ W}, 9000\text{ W}]$ (16 underpowered below $3500\text{ W}$, min $1264\text{ W}$; 21 overpowered above $9000\text{ W}$, max $10,470\text{ W}$).
+   - Every single one of these 37 runs ($100.0\%$) triggers `source_machine_failure = 1`.
+2. **Tool Wear Operates via a Stochastic Window, Not a Monotonic Curve**:
+   - Tool wear progression alone does not cause deterministic breakdown.
+   - All 24 `Tool Wear` failure events occur strictly within $[200\text{ min}, 235\text{ min}]$ (mean $216.0\text{ min}$).
+   - However, reaching $\ge 200\text{ min}$ does not guarantee failure: out of 110 total runs with wear $\ge 200\text{ min}$, **47 runs operate completely normally (42.7% normal operation rate)**.
+   - This directly confirms the source mechanism: $200 - 240\text{ min}$ is a probabilistic replacement/breakdown window, not a simple monotonic failure curve.
 
 **What Track 1 does fix:** the project no longer grades models against a label that the project itself created from the model's own inputs.
 **What it does not show:** performance on real machines.

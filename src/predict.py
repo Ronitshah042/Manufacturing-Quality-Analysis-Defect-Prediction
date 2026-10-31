@@ -81,13 +81,16 @@ def predict_machine_failure(
     if pipeline is None:
         pipeline = load_model(model_path)
 
+    def _to_float(val):
+        return np.nan if val is None else float(val)
+
     input_data = pd.DataFrame(
         [{
-            "air_temperature_k": float(air_temperature_k),
-            "process_temperature_k": float(process_temperature_k),
-            "rotational_speed_rpm": float(rotational_speed_rpm),
-            "torque_nm": float(torque_nm),
-            "tool_wear_min": float(tool_wear_min),
+            "air_temperature_k": _to_float(air_temperature_k),
+            "process_temperature_k": _to_float(process_temperature_k),
+            "rotational_speed_rpm": _to_float(rotational_speed_rpm),
+            "torque_nm": _to_float(torque_nm),
+            "tool_wear_min": _to_float(tool_wear_min),
         }],
         columns=TELEMETRY_FEATURES,
     )

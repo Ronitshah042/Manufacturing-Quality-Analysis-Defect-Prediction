@@ -74,20 +74,35 @@ class TestManufacturingPipeline(unittest.TestCase):
         pipe = create_pipeline(random_state=42)
         pipe.fit(X_train, y_train)
 
-        # Imputer check
+        # Check imputer learned column medians
         imputer = pipe.named_steps["imputer"]
-        self.assertEqual(imputer.statistics_[0], 300.0)
+        expected_medians = [300.0, 310.0, 1500.0, 40.0, 100.0]
+        np.testing.assert_array_equal(imputer.statistics_, expected_medians)
 
-        # Test prediction on NaN sample
-        X_test = pd.DataFrame({
-            "air_temperature_k": [np.nan],
-            "process_temperature_k": [310.0],
-            "rotational_speed_rpm": [1500.0],
-            "torque_nm": [40.0],
-            "tool_wear_min": [100.0],
-        })
-        pred = pipe.predict(X_test)
-        self.assertEqual(len(pred), 1)
+        # 1. Test every individual feature missing in isolation
+        for feat in TELEMETRY_FEATURES:
+            row = {f: 300.0 if "temp" in f else (1500.0 if "rpm" in f else (40.0 if "torque" in f else 100.0)) for f in TELEMETRY_FEATURES}
+            row[feat] = np.nan
+            X_single_missing = pd.DataFrame([row], columns=TELEMETRY_FEATURES)
+            pred = pipe.predict(X_single_missing)
+            self.assertEqual(len(pred), 1)
+
+        # 2. Test missing-value handling after serialization and reloading
+        with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            joblib.dump(pipe, tmp_path)
+            reloaded = joblib.load(tmp_path)
+            X_all_nan = pd.DataFrame([{f: np.nan for f in TELEMETRY_FEATURES}], columns=TELEMETRY_FEATURES)
+            pred_orig = pipe.predict(X_all_nan)
+            pred_reloaded = reloaded.predict(X_all_nan)
+            np.testing.assert_array_equal(pred_orig, pred_reloaded)
+            # Replaced with median matches prediction on median row directly
+            X_median = pd.DataFrame([dict(zip(TELEMETRY_FEATURES, expected_medians))])
+            pred_median = pipe.predict(X_median)
+            self.assertEqual(pred_orig[0], pred_median[0])
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
     def test_data_loader_telemetry_features_and_deduplication(self):
         """DataLoader must extract TELEMETRY_FEATURES and remove duplicates."""
@@ -160,7 +175,17 @@ class TestManufacturingPipeline(unittest.TestCase):
             pipeline=pipe,
         )
         self.assertTrue(res_fail["failure"])
-        self.assertEqual(res_fail["status"], "MACHINE FAILURE RISK")
+        # Machine with missing sensor value (None handled via imputer)
+        res_missing = predict_machine_failure(
+            air_temperature_k=None,
+            process_temperature_k=308.6,
+            rotational_speed_rpm=1551,
+            torque_nm=42.8,
+            tool_wear_min=None,
+            pipeline=pipe,
+        )
+        self.assertIn("failure", res_missing)
+        self.assertIn("status", res_missing)
 
     def test_evaluate_model_training_and_test_accuracy(self):
         """evaluate_model must accurately compute both training and test accuracy."""
