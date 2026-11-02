@@ -9,7 +9,7 @@ A reproducible, modular Python machine learning workflow for industrial predicti
 This repository investigates two distinct manufacturing prediction paradigms:
 
 1. **Track 1: Predictive Maintenance on UCI Sensor Columns (Primary)**<br>
-   Trains ML pipelines on the five original UCI AI4I 2020 sensor columns (`air_temperature_k`, `process_temperature_k`, `rotational_speed_rpm`, `torque_nm`, `tool_wear_min`) to predict the UCI `Machine failure` label (`source_machine_failure`).
+   Trains ML pipelines on the five original UCI AI4I 2020 sensor columns (`air_temperature_k`, `process_temperature_k`, `rotational_speed_rpm`, `torque_nm`, `tool_wear_min`), plus three features derived from them, to predict the UCI `Machine failure` label (`source_machine_failure`).
 2. **Track 2: Dimensional Tolerance Analysis (Leakage Demonstration)**<br>
    Uses workpiece measurements (`length_mm`, `weight_g`) that **this project generated** from the sensor data. It is kept to demonstrate **synthetic-label leakage**.
 
@@ -48,33 +48,54 @@ The exact generator formulas, UCI failure rules, sampling caveats and data dicti
 
 ## 📊 Track 1 Verified Performance & Metrics
 
-Rerun on 31 Oct 2026 with `python3 src/train.py`, on a held-out stratified test set ($n = 200$: 170 normal runs, 30 failures). The failure rate is oversampled to 15% here; the UCI source rate is 3.39%:
+Measured on 2 Nov 2026 with `python3 src/train.py`. Models use the five sensors plus three derived features: temperature difference, power (`torque × rpm × 2π/60`) and strain (`tool_wear × torque`). A run is flagged as a failure at a probability of 0.4 or more, on the assumption that a missed failure costs more than an inspection.
+
+### Cross-Validated Performance (use this to compare models)
+
+Stratified 5-fold cross-validation repeated 5 times on all 1,000 rows (mean ± standard deviation across folds). The failure rate here is oversampled to 15%; the UCI source rate is 3.39%:
+
+| Model | Failure Precision | Failure Recall | F1-Score |
+| :--- | :---: | :---: | :---: |
+| Decision Tree | 0.842 ± 0.072 | 0.809 ± 0.065 | 0.822 ± 0.048 |
+| Logistic Regression | 0.737 ± 0.088 | 0.591 ± 0.064 | 0.653 ± 0.059 |
+| **Random Forest (300 trees, saved model)** | **0.858 ± 0.062** | **0.843 ± 0.055** | **0.848 ± 0.043** |
+| Previous model: Random Forest (50 trees), sensors only, threshold 0.5 | 0.794 ± 0.065 | 0.747 ± 0.077 | 0.765 ± 0.043 |
+
+### Unseen UCI Rows (hardest check)
+
+The 9,000 raw UCI rows outside the training sample, with 189 failures (2.10%). These rows are for reporting only, not for choosing models or thresholds. Because failures are rare here, precision is much lower than in the oversampled tables:
+
+| Model | Failure Precision | Failure Recall | F1-Score | False Alarms | Missed Failures (of 189) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Previous model (threshold 0.5) | 0.344 | 0.810 | 0.483 | 292 | 36 |
+| **Saved model (threshold 0.4)** | **0.447** | **0.894** | **0.596** | **209** | **20** |
+| Same new model at threshold 0.5, for comparison | 0.601 | 0.878 | 0.714 | 110 | 23 |
+
+Threshold 0.4 catches 3 more failures than 0.5 on these rows but raises 99 more false alarms. Change `FAILURE_THRESHOLD` in `src/pipeline.py` if false alarms are the larger cost.
+
+### Single Test Split
+
+Held-out stratified test set ($n = 200$: 170 normal runs, 30 failures). One failure is worth 3.3 recall points, so don't compare models on this table:
 
 | Model Architecture | Train Acc | Test Acc | Failure Precision | Failure Recall | F1-Score | Confusion Matrix (Normal / Failure) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline Decision Tree** | **1.0000** | **0.9250** | **0.8000 (80.0%)** | **0.6667 (66.7%)** | **0.7273** | `[[165, 5], [10, 20]]` |
-| **Logistic Regression** | **0.9012** | **0.9100** | **0.9286 (92.9%)** | **0.4333 (43.3%)** | **0.5909** | `[[169, 1], [17, 13]]` |
-| **Random Forest (50 trees)** | **1.0000** | **0.9700** | **0.9615 (96.2%)** | **0.8333 (83.3%)** | **0.8929** | `[[169, 1], [5, 25]]` |
+| **Decision Tree** | 1.0000 | 0.9450 | 0.8065 | 0.8333 | 0.8197 | `[[164, 6], [5, 25]]` |
+| **Logistic Regression** | 0.9075 | 0.9300 | 0.8636 | 0.6333 | 0.7308 | `[[167, 3], [11, 19]]` |
+| **Random Forest (300 trees, saved model)** | 1.0000 | 0.9750 | 0.9630 | 0.8667 | 0.9123 | `[[169, 1], [4, 26]]` |
 
 ### 🧠 Key Engineering Takeaways
 
-1. **Failure Recall & Industrial Cost of Missed Breakdowns**:
-   * In manufacturing, a **missed failure (False Negative)** can cause catastrophic spindle crash and factory downtime.
-   * **Decision Tree** missed 10 failures ($66.7\%$ recall).
-   * **Logistic Regression** missed 17 failures ($43.3\%$ recall). UCI's failure rules are interactions (torque × rpm power, wear × torque overstrain, ΔT and rpm for heat dissipation), which a linear model on raw features cannot represent.
-   * **Random Forest** caught **25 out of 30 failures ($83.3\%$ recall)** with 1 false alarm ($96.2\%$ precision), $F_1 = 0.8929$.
-2. **What these numbers do and don't mean**:
-   * They measure how well each model approximates the UCI label-generation rules from five of their inputs. The dropped product `Type` column and the random TWF/RNF components explain why recall is not near 100%.
-   * They come from a single 200-row split (1 failure = 3.3 recall points). They are not evidence of real-factory performance.
-3. **Leakage-Free Preprocessing**:
-   * `SimpleImputer` and `StandardScaler` are encapsulated inside Scikit-learn `Pipeline` objects and fitted **only** on `X_train`.
+1. **Why the derived features help**: UCI's failure rules depend on these sensor combinations, which are hard for trees to approximate from raw sensors. On the unseen rows, the saved model catches every heat, power and overstrain failure.
+2. **What still gets missed**: on the unseen rows it catches 6 of 22 tool wear failures and 0 of 19 random failures. Those modes are partly or fully random by design, so recall can't reach 100% from sensors alone.
+3. **What these numbers do and don't mean**: the derived features are essentially UCI's own formulas, so the gain shows the model recovering the rules that generated a synthetic label. It is not evidence of real-factory performance.
+4. **Leakage-Free Preprocessing**: `SimpleImputer` and `StandardScaler` are encapsulated inside Scikit-learn `Pipeline` objects and fitted **only** on training data. The derived features use each row's own values, so they learn nothing from other rows.
 
 ---
 
 ## ⚠️ Data Quality & Provenance Summary
 
 * **Benchmark Grounding**: Sourced from the peer-reviewed **AI4I 2020 Predictive Maintenance Dataset** (Matzka 2020, UCI Machine Learning Repository).
-* **Sample Size & Statistical Power**: With $n = 1,000$ (800 train, 200 test), each test classification error represents a $0.5\%$ impact, ensuring statistical credibility.
+* **Sample Size & Statistical Power**: With $n = 1,000$ (800 train, 200 test), each test classification error represents a $0.5\%$ accuracy change. With only 30 test failures, each missed failure moves recall by 3.3 points, so small gaps between models are not reliable.
 
 For complete documentation, see [docs/DATASET_CARD.md](docs/DATASET_CARD.md) and [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md).
 
@@ -88,10 +109,13 @@ AI_Learning/
 ├── manufacturing_samples_v1_toy.csv   # Preserved legacy 25-part prototype dataset
 ├── products.csv                      # Preserved practice data
 ├── quality_report.csv                # Preserved analysis output
-├── requirements.txt                  # Python dependencies
+├── requirements.txt                  # Pinned Python dependencies
+│
+├── data/raw/
+│   └── ai4i2020.csv                  # Unmodified UCI source file (CC BY 4.0), checksum-verified
 │
 ├── scripts/
-│   └── adapt_ai4i_dataset.py         # Reproducible dataset acquisition & adaptation script
+│   └── adapt_ai4i_dataset.py         # Reproducible dataset generation from the raw UCI file
 │
 ├── src/                              # Modular production code
 │   ├── __init__.py
@@ -100,7 +124,7 @@ AI_Learning/
 │   └── predict.py                    # Inference module, CLI, and demonstration runner
 │
 ├── models/
-│   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (imputer + decision tree)
+│   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (derived features + imputer + scaler + Random Forest)
 │
 ├── tests/
 │   ├── __init__.py
@@ -124,13 +148,16 @@ AI_Learning/
 ## 🚀 Quickstart & Usage
 
 ### 1. Installation
-Clone the repository and install dependencies:
+Clone the repository, then install the pinned dependencies in a virtual environment. Use Python 3.15, the version these pins and the saved model were verified on:
 ```bash
+python3.15 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
+Run the commands below from the repository root with the environment active.
 
 ### 2. Run Unit Tests
-Execute the automated test suite covering imputation, deduplication, serialization, and predictions:
+Execute the automated test suite covering imputation, deduplication, serialization, predictions, the saved model, and dataset regeneration:
 ```bash
 python3 -m unittest discover -s tests -v
 ```
@@ -176,7 +203,7 @@ python3 manufacturing_visualizations.py
 
 ## 📋 Tools & Technologies
 
-* **Language**: Python 3.9+
+* **Language**: Python 3.15
 * **Data Processing**: Pandas, NumPy
 * **Machine Learning**: Scikit-learn (Pipelines, Decision Trees, SimpleImputer, Metrics)
 * **Visualization**: Matplotlib

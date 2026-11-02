@@ -26,11 +26,12 @@ rules on these sensor columns. See docs/DATASET_CARD.md.
 
 from pathlib import Path
 from typing import List, Optional, Tuple
+import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import FunctionTransformer, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
 # Track 1: Original UCI AI4I 2020 sensor columns (Primary)
@@ -50,6 +51,59 @@ DIMENSIONAL_TARGET = "defective"
 # Default to Track 1 sensor columns
 FEATURE_NAMES = TELEMETRY_FEATURES
 TARGET_NAME = TELEMETRY_TARGET
+
+# Flag a failure at this probability: a missed failure is assumed to cost more than an inspection.
+FAILURE_THRESHOLD = 0.4
+
+RAW_AI4I_PATH = "data/raw/ai4i2020.csv"
+RAW_TO_TELEMETRY = {
+    "Air temperature [K]": "air_temperature_k",
+    "Process temperature [K]": "process_temperature_k",
+    "Rotational speed [rpm]": "rotational_speed_rpm",
+    "Torque [Nm]": "torque_nm",
+    "Tool wear [min]": "tool_wear_min",
+}
+
+
+def add_interaction_features(X: pd.DataFrame) -> pd.DataFrame:
+    """Add the sensor combinations that UCI's failure rules use (docs/DATASET_CARD.md §2b)."""
+    return X.assign(
+        temperature_difference_k=X["process_temperature_k"] - X["air_temperature_k"],
+        power_w=X["torque_nm"] * X["rotational_speed_rpm"] * 2 * np.pi / 60,
+        wear_torque_min_nm=X["tool_wear_min"] * X["torque_nm"],
+    )
+
+
+def failure_probabilities(pipeline, X: pd.DataFrame) -> np.ndarray:
+    """Return each row's probability of class 1, or zeros if training data had no failures."""
+    classes = list(pipeline.classes_)
+    if 1 not in classes:
+        return np.zeros(len(X))
+    return pipeline.predict_proba(X)[:, classes.index(1)]
+
+
+def predict_failure(pipeline, X: pd.DataFrame, threshold: float = FAILURE_THRESHOLD) -> np.ndarray:
+    """Return 0/1 failure predictions using the project's decision threshold."""
+    if not hasattr(pipeline, "predict_proba"):
+        return pipeline.predict(X).astype(int)
+    return (failure_probabilities(pipeline, X) >= threshold).astype(int)
+
+
+def load_unseen_ai4i(
+    sample_csv: str = "manufacturing_samples.csv",
+    raw_csv: str = RAW_AI4I_PATH,
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """Return raw UCI rows that are not in the training sample, as X and y in the Track 1 schema."""
+    raw = pd.read_csv(raw_csv)
+    sample_ids = pd.read_csv(sample_csv)["product_id"].str.replace("PART-", "").astype(int)
+    missing = sample_ids[~sample_ids.isin(raw["UDI"])]
+    if not missing.empty:
+        raise ValueError(f"{len(missing)} sample rows are not in {raw_csv}")
+
+    unseen = raw[~raw["UDI"].isin(sample_ids)]
+    X = unseen[list(RAW_TO_TELEMETRY)].rename(columns=RAW_TO_TELEMETRY).astype(float)
+    y = unseen["Machine failure"].astype(int).rename(TELEMETRY_TARGET)
+    return X.reset_index(drop=True), y.reset_index(drop=True)
 
 
 def load_and_clean_data(
@@ -110,6 +164,7 @@ def create_pipeline(
     classifier: Optional[BaseEstimator] = None,
     include_scaler: bool = True,
     random_state: int = 42,
+    include_interactions: bool = False,
 ) -> Pipeline:
     """
     Build a reproducible Scikit-learn Pipeline with median imputation,
@@ -124,11 +179,15 @@ def create_pipeline(
         disparate engineering units (RPM vs Nm vs Kelvin vs Minutes).
     random_state : int, default=42
         Random seed for reproducibility.
+    include_interactions : bool, default=False
+        Whether to derive the Track 1 interaction features. Requires the telemetry columns.
+        A missing sensor makes its derived features missing too, and the imputer fills them.
 
     Returns
     -------
     pipeline : sklearn.pipeline.Pipeline
         Pipeline containing:
+        - 'features': add_interaction_features (if include_interactions=True)
         - 'imputer': SimpleImputer(strategy='median')
         - 'scaler': StandardScaler() (if include_scaler=True)
         - 'classifier': Chosen classifier estimator
@@ -136,7 +195,10 @@ def create_pipeline(
     if classifier is None:
         classifier = DecisionTreeClassifier(random_state=random_state)
 
-    steps = [("imputer", SimpleImputer(strategy="median"))]
+    steps = []
+    if include_interactions:
+        steps.append(("features", FunctionTransformer(add_interaction_features)))
+    steps.append(("imputer", SimpleImputer(strategy="median")))
     if include_scaler:
         steps.append(("scaler", StandardScaler()))
     steps.append(("classifier", classifier))

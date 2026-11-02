@@ -1,4 +1,4 @@
-# Project Log: Manufacturing Quality Analysis & Defect Prediction
+# Project Log: Predictive Maintenance & Manufacturing Quality Analysis
 
 **Repository**: `AI_Learning`  
 **Domain**: Manufacturing Quality Assurance / Machine Learning  
@@ -9,9 +9,9 @@
 
 ## 1. Executive Summary & Objective
 
-The objective of this project is to build a clean, reproducible, and modular machine learning workflow for predicting quality defects in manufactured metal parts, expanding upon introductory Python, NumPy, Pandas, and Matplotlib data-analysis exercises.
+The objective of this project is to build a clean, reproducible, and modular machine learning workflow for predicting machine failure from sensor readings on the synthetic UCI AI4I 2020 benchmark, expanding upon introductory Python, NumPy, Pandas, and Matplotlib data-analysis exercises.
 
-Rather than recreating the repository from scratch or deleting prior learning exercises, this project structures an end-to-end Scikit-learn pipeline, implements unit testing, diagnoses subtle data leakage and label provenance issues, and provides an inference interface for new product measurements.
+Rather than recreating the repository from scratch or deleting prior learning exercises, this project structures an end-to-end Scikit-learn pipeline, implements unit testing, diagnoses subtle data leakage and label provenance issues, and provides an inference interface for new sensor readings. The earlier part-defect prediction is kept only as the Track 2 leakage demonstration.
 
 ---
 
@@ -21,7 +21,7 @@ Rather than recreating the repository from scratch or deleting prior learning ex
 Prior to making changes, the repository was audited:
 * **Pre-existing analysis & visualization scripts**: `manufacturing_data_analysis.py`, `manufacturing_visualizations.py`, `manufacturing_visualisation.py`, `quality_analyser.py`, `pandas_basics.py`, `numpy_basics.py`, `read_csv.py`. All preserved without deletion.
 * **Datasets**: `manufacturing_samples.csv` (primary ML dataset), `products.csv` (basic exercise data), `quality_report.csv`.
-* **Environment**: Python 3.9.6, Scikit-learn 1.6.1, Pandas 2.3.3, NumPy 2.0.2, Matplotlib 3.9.4, Joblib 1.5.3.
+* **Environment at audit time**: Python 3.9.6, Scikit-learn 1.6.1, Pandas 2.3.3, NumPy 2.0.2, Matplotlib 3.9.4, Joblib 1.5.3. Moved on 2 Nov 2026 to Python 3.15.2 and the versions in `requirements.txt`; retraining gave identical probabilities on all 1,000 rows.
 
 ### 2.2 Dataset Breakdown (`manufacturing_samples.csv`)
 * **Evolution**: Upgraded from the initial 25-part mock prototype (archived as `manufacturing_samples_v1_toy.csv`) to a **1,000-part precision manufacturing dataset** adapted from the UCI Machine Learning Repository's [AI4I 2020 Predictive Maintenance Dataset](https://archive.ics.uci.edu/ml/machine-learning-databases/00601/ai4i2020.csv) (Matzka 2020).
@@ -65,29 +65,47 @@ When models were trained on generated dimensions (`weight_g`, `length_mm`) to pr
 ### 4.1 Data Splitting & Preprocessing
 * **Dataset**: 1,000 machine runs from `manufacturing_samples.csv` (850 normal runs, 150 machine failures). Failures are oversampled to 15%; the UCI source rate is 3.39%.
 * **Split**: Stratified 80% train ($n = 800$, 680 normal, 120 failures) and 20% test ($n = 200$, 170 normal, 30 failures).
+* **Features**: The five sensors plus temperature difference, power and strain, derived inside the pipeline.
+* **Decision threshold**: 0.4, on the assumption that a missed failure costs more than an inspection.
 * **Pipeline Isolation**: `SimpleImputer(strategy="median")` and `StandardScaler()` are encapsulated inside a Scikit-learn `Pipeline` and fitted strictly on `X_train`.
 
 ### 4.2 Verified Model Performance Comparison
 
-All models were evaluated on the held-out stratified test set ($n = 200$, 170 normal, 30 failures). **These numbers represent verified experimental outputs from execution:**
+**These numbers are measured outputs from execution on 2 Nov 2026.**
+
+Stratified 5-fold cross-validation repeated 5 times on all 1,000 rows (mean ± standard deviation across folds):
+
+| Model | Failure Precision | Failure Recall | F1-Score |
+| :--- | :---: | :---: | :---: |
+| Decision Tree | 0.842 ± 0.072 | 0.809 ± 0.065 | 0.822 ± 0.048 |
+| Logistic Regression | 0.737 ± 0.088 | 0.591 ± 0.064 | 0.653 ± 0.059 |
+| **Random Forest (300 trees, saved model)** | **0.858 ± 0.062** | **0.843 ± 0.055** | **0.848 ± 0.043** |
+| Previous model: Random Forest (50 trees), sensors only, threshold 0.5 | 0.794 ± 0.065 | 0.747 ± 0.077 | 0.765 ± 0.043 |
+
+The 9,000 raw UCI rows outside the sample, with 189 failures (2.10%), for reporting only:
+
+| Model | Failure Precision | Failure Recall | F1-Score | False Alarms | Missed Failures (of 189) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Previous model (threshold 0.5) | 0.344 | 0.810 | 0.483 | 292 | 36 |
+| **Saved model (threshold 0.4)** | **0.447** | **0.894** | **0.596** | **209** | **20** |
+| Same new model at threshold 0.5, for comparison | 0.601 | 0.878 | 0.714 | 110 | 23 |
+
+Single held-out stratified test set ($n = 200$, 170 normal, 30 failures):
 
 | Model Architecture | Train Acc | Test Acc | Failure Precision | Failure Recall | F1-Score | Confusion Matrix (Normal / Failure) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline Decision Tree** | **1.0000** | **0.9250** | **0.8000 (80.0%)** | **0.6667 (66.7%)** | **0.7273** | `[[165, 5], [10, 20]]` |
-| **Logistic Regression** | **0.9012** | **0.9100** | **0.9286 (92.9%)** | **0.4333 (43.3%)** | **0.5909** | `[[169, 1], [17, 13]]` |
-| **Random Forest (50 trees)** | **1.0000** | **0.9700** | **0.9615 (96.2%)** | **0.8333 (83.3%)** | **0.8929** | `[[169, 1], [5, 25]]` |
+| **Decision Tree** | 1.0000 | 0.9450 | 0.8065 | 0.8333 | 0.8197 | `[[164, 6], [5, 25]]` |
+| **Logistic Regression** | 0.9075 | 0.9300 | 0.8636 | 0.6333 | 0.7308 | `[[167, 3], [11, 19]]` |
+| **Random Forest (300 trees, saved model)** | 1.0000 | 0.9750 | 0.9630 | 0.8667 | 0.9123 | `[[169, 1], [4, 26]]` |
 
-### 4.3 Engineering Interpretation of Confusion Matrices & Recall
+### 4.3 Engineering Interpretation
 
-1. **Failure Recall (Sensitivity)**:
-   * In manufacturing predictive maintenance, a **missed failure (False Negative)** can cause catastrophic CNC spindle crash, expensive tooling destruction, or factory line shutdown.
-   * **Decision Tree** missed 10 failures (Recall: $66.7\%$).
-   * **Logistic Regression** missed 17 failures (Recall: $43.3\%$). The UCI failure rules are feature interactions (torque × rpm power, wear × torque overstrain), which a linear model on raw features cannot represent.
-   * **Random Forest** caught **25 out of 30 failures (Recall: $83.3\%$)** with **1 false alarm (Precision: $96.2\%$)**, $F_1 = 0.8929$.
+1. **What improved**: compared with the previous model on the unseen rows, missed failures fell from 36 to 20 and false alarms from 292 to 209. Threshold 0.4 was chosen from cross-validation: F1 is effectively the same as at 0.5 (0.848 vs 0.851), recall rises from 0.809 to 0.843, and precision falls from 0.901 to 0.858.
 2. **Interpretation limits**:
-   * The scores measure how well each model approximates the UCI rule system from five of its inputs. Missing product `Type` (used by the OSF rule) and the random TWF/RNF parts limit the achievable recall.
-   * Single 200-row split, 30 failures: one failure = 3.3 recall points. Precision is inflated by the 15% oversampled failure rate.
-   * The saved `models/defect_pipeline.joblib` reproduces a fresh retrain exactly (predictions and probabilities on all 1,000 rows).
+   * The derived features are essentially UCI's rule inputs, so scores measure rule recovery on a synthetic benchmark, not real-factory performance.
+   * The unseen rows catch all heat, power and overstrain failures but only 6 of 22 tool wear and 0 of 19 random failures, which are partly or fully random by design.
+   * Single-split scores are noisy (one failure = 3.3 recall points). Precision on the 15% oversampled file is higher than it would be at the source rate.
+   * `src/train.py` reproduces `models/defect_pipeline.joblib` byte for byte on the same setup.
 
 ---
 
@@ -100,18 +118,20 @@ AI_Learning/
 ├── products.csv                      # Exercise data
 ├── quality_report.csv                # Output of quality analyser
 ├── requirements.txt                  # Pinned dependencies
+├── data/raw/
+│   └── ai4i2020.csv                  # Unmodified UCI source file (CC BY 4.0), checksum-verified
 ├── scripts/
-│   └── adapt_ai4i_dataset.py         # Reproducible dataset acquisition and adaptation script
+│   └── adapt_ai4i_dataset.py         # Reproducible dataset generation from the raw UCI file
 ├── src/
 │   ├── __init__.py
 │   ├── pipeline.py                   # Data loader, deduplication, Track 1 & 2 Pipeline factory
 │   ├── train.py                      # Track 1 training, model comparison, evaluation, joblib serialization
 │   └── predict.py                    # Predictive maintenance inference CLI and demo runner
 ├── models/
-│   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (imputer + scaler + Random Forest)
+│   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (derived features + imputer + scaler + Random Forest)
 ├── tests/
 │   ├── __init__.py
-│   └── test_pipeline.py              # 7 unit tests covering telemetry pipeline, imputation, serialization, and predictions
+│   └── test_pipeline.py              # 17 unit tests covering telemetry pipeline, derived features, threshold, imputation, serialization, predictions, cross-validation, saved model, and dataset regeneration
 ├── docs/
 │   ├── DATASET_CARD.md               # Source vs generated data distinction & synthetic leakage card
 │   └── PROJECT_LOG.md                # Comprehensive project documentation and logs
@@ -121,11 +141,13 @@ AI_Learning/
 ### 5.1 Module Responsibilities
 * **`src/pipeline.py`**:
   * `load_and_clean_data(csv_path)`: Loads data, deduplicates rows, validates column presence, and outputs $(X, y)$.
-  * `create_pipeline(classifier, random_state)`: Returns Scikit-learn `Pipeline([('imputer', SimpleImputer(strategy='median')), ('classifier', classifier)])`.
+  * `create_pipeline(classifier, include_scaler, random_state, include_interactions)`: Returns Scikit-learn `Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler()), ('classifier', classifier)])`. The scaler is omitted when `include_scaler=False`, and `include_interactions=True` adds a leading `add_interaction_features` step.
+  * `predict_failure(pipeline, X, threshold)`: Applies `FAILURE_THRESHOLD` (0.4).
+  * `load_unseen_ai4i(sample_csv, raw_csv)`: Returns the raw UCI rows outside the training sample.
 * **`src/train.py`**:
-  * Trains baseline Decision Tree and comparison models.
-  * Prints evaluation metrics and comparison table.
-  * Serializes fitted pipeline to `models/defect_pipeline.joblib`.
+  * Trains Decision Tree, Logistic Regression and Random Forest models with derived features.
+  * Prints single-split metrics, repeated cross-validation, and the saved model's results on unseen UCI rows.
+  * Serializes the fitted Random Forest pipeline to `models/defect_pipeline.joblib`.
   * Verifies that reloaded pipeline produces identical predictions.
 * **`src/predict.py`**:
   * `predict_machine_failure(air_temperature_k, process_temperature_k, rotational_speed_rpm, torque_nm, tool_wear_min, pipeline=None)`: returns `failure` (bool), `status` (`NORMAL OPERATION` / `MACHINE FAILURE RISK`), and `failure_probability`.
@@ -133,13 +155,13 @@ AI_Learning/
   * CLI: `python3 src/predict.py --air_temp 298.1 --process_temp 308.6 --rpm 1551 --torque 42.8 --tool_wear 0`. Omitted flags fall back to defaults; an explicit `0` is kept.
   * Demo mode: `python3 src/predict.py` (5 operating scenarios).
 * **`tests/test_pipeline.py`**:
-  * Unit test suite using standard library `unittest` (7 tests).
+  * Unit test suite using standard library `unittest` (17 tests).
 
 ---
 
 ## 6. Verification and Command Execution Log
 
-The following commands were executed and verified directly in the environment:
+The following commands were rerun on 2 Nov 2026 from the repository root, in a `.venv` built from `requirements.txt` on Python 3.15.2. Commands 5 and 6 wrote their outputs to a temporary directory so tracked files stayed unchanged:
 
 ### Command 1: Run Unit Tests
 ```bash
@@ -147,16 +169,26 @@ python3 -m unittest discover -s tests -v
 ```
 **Outcome**:
 ```
-test_data_loader_features_and_deduplication (test_pipeline.TestManufacturingPipeline) ... ok
-test_evaluate_model_training_and_test_accuracy (test_pipeline.TestManufacturingPipeline) ... ok
-test_missing_value_imputation (test_pipeline.TestManufacturingPipeline) ... ok
-test_pipeline_serialization_and_reload (test_pipeline.TestManufacturingPipeline) ... ok
-test_pipeline_structure (test_pipeline.TestManufacturingPipeline) ... ok
-test_predict_defect_edge_cases (test_pipeline.TestManufacturingPipeline) ... ok
-test_predict_defect_function (test_pipeline.TestManufacturingPipeline) ... ok
+test_backward_compatible_predict_defect ... ok
+test_cross_validation_scores_every_fold ... ok
+test_data_loader_telemetry_features_and_deduplication ... ok
+test_decision_threshold_is_applied ... ok
+test_evaluate_model_training_and_test_accuracy ... ok
+test_fetch_raw_download_saves_only_verified_data ... ok
+test_fetch_raw_rejects_changed_local_copy ... ok
+test_generator_reproduces_tracked_dataset_offline ... ok
+test_interaction_features_match_uci_formulas ... ok
+test_interaction_pipeline_handles_missing_sensor ... ok
+test_missing_value_imputation ... ok
+test_model_without_probabilities_uses_plain_prediction ... ok
+test_pipeline_serialization_and_reload ... ok
+test_pipeline_structure ... ok
+test_predict_machine_failure_function ... ok
+test_tracked_model_loads_and_predicts ... ok
+test_unseen_rows_exclude_training_sample ... ok
 
 ----------------------------------------------------------------------
-Ran 7 tests in 0.336s
+Ran 17 tests
 
 OK
 ```
@@ -166,36 +198,37 @@ OK
 python3 src/train.py
 ```
 **Outcome**:
-* Successfully loaded 25 unique parts from `manufacturing_samples.csv`.
-* Stratified 80/20 train/test split completed.
-* Evaluated Decision Tree (100% Acc), Logistic Regression (60% Acc), Random Forest (100% Acc).
-* Serialized fitted pipeline to `models/defect_pipeline.joblib`.
-* Verified reload consistency against in-memory model predictions.
+* Loaded 1,000 machine runs from `manufacturing_samples.csv` (850 normal, 150 failures).
+* Stratified 80/20 train/test split completed (800 / 200 rows).
+* Reproduced the §4.2 tables, and the saved model file is byte-identical across runs.
 
 ### Command 3: Demo Predictions
 ```bash
 python3 src/predict.py
 ```
 **Outcome**:
-* Nominal compliant part (`250.2 g`, `100.04 mm`) $\implies$ `PASSED QA` (Defect Prob: 0%)
-* In-spec slightly light part (`249.4 g`, `99.95 mm`) $\implies$ `PASSED QA` (Defect Prob: 0%)
-* Oversized length defect (`262.3 g`, `100.41 mm`) $\implies$ `DEFECTIVE` (Defect Prob: 100%)
-* Undersized length defect (`239.1 g`, `99.68 mm`) $\implies$ `DEFECTIVE` (Defect Prob: 100%)
-* Missing weight reading (`None`, `100.03 mm`) $\implies$ `PASSED QA` (Imputed weight used, Defect Prob: 0%)
-* Overweight anomaly (`275.0 g`, `100.35 mm`) $\implies$ `DEFECTIVE` (Defect Prob: 100%)
+* Nominal milling operation $\implies$ `NORMAL OPERATION` (Failure Prob: 2.0%)
+* Fresh cutting tool, moderate cut $\implies$ `NORMAL OPERATION` (Failure Prob: 0.0%)
+* Critical tool wear breakdown (TWF) $\implies$ `MACHINE FAILURE RISK` (Failure Prob: 75.3%)
+* Overstrain cutting load (OSF) $\implies$ `MACHINE FAILURE RISK` (Failure Prob: 95.0%)
+* Heat dissipation failure (HDF) $\implies$ `MACHINE FAILURE RISK` (Failure Prob: 89.7%)
 
-### Command 4: Custom Single-Part CLI Predictions
+### Command 4: Custom Sensor CLI Predictions
 ```bash
-python3 src/predict.py --weight 250.2 --length 100.04
-python3 src/predict.py --weight 262.3 --length 100.41
-python3 src/predict.py --length 100.03
+python3 src/predict.py --air_temp 298.2 --process_temp 308.7 --rpm 1500 --torque 40.0 --tool_wear 40
+python3 src/predict.py --air_temp 301.2 --process_temp 311.5 --rpm 1280 --torque 69.8 --tool_wear 195
+python3 src/predict.py --rpm 1280 --torque 69.8 --tool_wear 195
 ```
-**Outcome**: All CLI options executed with accurate formatted inspection output.
+**Outcome**: `NORMAL OPERATION` (2.0%), `MACHINE FAILURE RISK` (95.0%), and `MACHINE FAILURE RISK` (95.7%, with omitted flags using defaults).
 
 ### Command 5: Verification of Existing Learning Scripts
-* `python3 quality_analyser.py`: Succeeded without regression.
-* `python3 manufacturing_data_analysis.py`: Succeeded without regression.
-* `python3 manufacturing_visualizations.py`: Succeeded without regression.
+All exited with status 0: `quality_analyser.py`, `manufacturing_data_analysis.py`, `manufacturing_visualizations.py`, `manufacturing_visualisation.py`, `numpy_basics.py`, `pandas_basics.py`, `read_csv.py`.
+
+### Command 6: Dataset Regeneration
+```bash
+python3 scripts/adapt_ai4i_dataset.py
+```
+**Outcome**: Read the checksum-verified `data/raw/ai4i2020.csv` with no download and produced a file byte-identical to the tracked `manufacturing_samples.csv`.
 
 ---
 
@@ -204,5 +237,4 @@ python3 src/predict.py --length 100.03
 For transitioning this portfolio prototype toward production-grade quality inspection:
 1. **Acquire Empirical Inspection Data**: Collect at least $500$–$5,000$ real parts with genuine CMM measurements and independent destructive/metallurgical testing logs.
 2. **Incorporate Multi-Sensor Dimensions**: Add `width_mm`, `height_mm`, surface finish ($R_a$), and machine vibration telemetry.
-3. **Continuous Integration**: Add GitHub Actions workflow to run `unittest discover` on pull requests.
-4. **Drift Monitoring**: Monitor dimensional distribution shift over time to detect CNC tool wear before defects occur.
+3. **Drift Monitoring**: Monitor dimensional distribution shift over time to detect CNC tool wear before defects occur.

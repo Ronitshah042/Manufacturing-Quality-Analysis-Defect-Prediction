@@ -5,6 +5,7 @@
 | **File** | [`manufacturing_samples.csv`](../manufacturing_samples.csv) — 1,000 rows, 14 columns |
 | **Generator** | [`scripts/adapt_ai4i_dataset.py`](../scripts/adapt_ai4i_dataset.py) (`random_state=42`) |
 | **Upstream source** | UCI [AI4I 2020 Predictive Maintenance Dataset](https://archive.ics.uci.edu/dataset/601/ai4i+2020+predictive+maintenance+dataset) (10,000 rows), DOI [10.24432/C5HS5C](https://doi.org/10.24432/C5HS5C) |
+| **Raw source copy** | [`data/raw/ai4i2020.csv`](../data/raw/ai4i2020.csv): unmodified UCI file, CC BY 4.0. The generator checks its SHA-256 and downloads it only if missing |
 | **Citation** | S. Matzka, "Explainable Artificial Intelligence for Predictive Maintenance Applications," *AI4I 2020*, doi:10.1109/AI4I49448.2020.00023 |
 | **Previous prototype** | [`manufacturing_samples_v1_toy.csv`](../manufacturing_samples_v1_toy.csv): byte-identical copy of the original 26-row file (25 unique parts + 1 duplicate) |
 
@@ -102,23 +103,43 @@ According to UCI's documentation, `Machine failure = 1` when **any** of these fi
   - 8 of the 150 failure rows have more than one mode flagged.
   - 5 rows have `source_machine_failure = 1` but **no** mode flag in UCI, and are labelled `"Normal Operation"`.
   - Use `source_machine_failure` as the target, never `failure_type`.
-- **Single split.** All reported metrics come from one 200-row test set with 30 failures. One failure is worth 3.3 recall points, so differences of a few points between models are not reliable.
+- **Single split.** The per-model tables come from one 200-row test set with 30 failures. One failure is worth 3.3 recall points, so differences of a few points between models are not reliable. §4 adds repeated cross-validation and a check on unseen rows.
 
 ---
 
-## 4. Track 1 results (rerun 31 Oct 2026)
+## 4. Track 1 results (measured 2 Nov 2026)
 
-Command: `/usr/bin/python3 src/train.py`. Features: the five Group A sensor columns. Target: `source_machine_failure`. Stratified 80/20 split, `random_state=42`. Test set n = 200 (170 normal, 30 failure).
+Command: `python3 src/train.py` (Python 3.15, versions pinned in `requirements.txt`). Features: the five Group A sensor columns plus three derived in the pipeline: temperature difference, power (`torque × rpm × 2π/60`) and strain (`tool_wear × torque`). Target: `source_machine_failure`. Decision threshold: 0.4. `random_state=42`.
 
-| Model | Train acc | Test acc | Failure precision | Failure recall | F1 | Confusion matrix `[[TN, FP], [FN, TP]]` |
+Stratified 5-fold cross-validation repeated 5 times on all 1,000 rows (mean ± standard deviation across folds):
+
+| Model | Failure Precision | Failure Recall | F1-Score |
+| :--- | :---: | :---: | :---: |
+| Decision Tree | 0.842 ± 0.072 | 0.809 ± 0.065 | 0.822 ± 0.048 |
+| Logistic Regression | 0.737 ± 0.088 | 0.591 ± 0.064 | 0.653 ± 0.059 |
+| **Random Forest (300 trees, saved model)** | **0.858 ± 0.062** | **0.843 ± 0.055** | **0.848 ± 0.043** |
+| Previous model: Random Forest (50 trees), sensors only, threshold 0.5 | 0.794 ± 0.065 | 0.747 ± 0.077 | 0.765 ± 0.043 |
+
+The 9,000 raw UCI rows outside the sample, with 189 failures (2.10%). These are for reporting only, not for choosing models or thresholds:
+
+| Model | Failure Precision | Failure Recall | F1-Score | False Alarms | Missed Failures (of 189) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Previous model (threshold 0.5) | 0.344 | 0.810 | 0.483 | 292 | 36 |
+| **Saved model (threshold 0.4)** | **0.447** | **0.894** | **0.596** | **209** | **20** |
+| Same new model at threshold 0.5, for comparison | 0.601 | 0.878 | 0.714 | 110 | 23 |
+
+Stratified 80/20 test split, n = 200 (170 normal, 30 failure), confusion matrix `[[TN, FP], [FN, TP]]`:
+
+| Model Architecture | Train Acc | Test Acc | Failure Precision | Failure Recall | F1-Score | Confusion Matrix (Normal / Failure) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| Decision Tree | 1.0000 | 0.9250 | 0.8000 | 0.6667 | 0.7273 | `[[165, 5], [10, 20]]` |
-| Logistic Regression | 0.9012 | 0.9100 | 0.9286 | 0.4333 | 0.5909 | `[[169, 1], [17, 13]]` |
-| Random Forest (50) | 1.0000 | 0.9700 | 0.9615 | 0.8333 | 0.8929 | `[[169, 1], [5, 25]]` |
+| **Decision Tree** | 1.0000 | 0.9450 | 0.8065 | 0.8333 | 0.8197 | `[[164, 6], [5, 25]]` |
+| **Logistic Regression** | 0.9075 | 0.9300 | 0.8636 | 0.6333 | 0.7308 | `[[167, 3], [11, 19]]` |
+| **Random Forest (300 trees, saved model)** | 1.0000 | 0.9750 | 0.9630 | 0.8667 | 0.9123 | `[[169, 1], [4, 26]]` |
 
-The saved model `models/defect_pipeline.joblib` is the Random Forest row. Its predictions and probabilities on all 1,000 rows match a fresh retrain exactly.
+The saved model `models/defect_pipeline.joblib` is the Random Forest row. Retraining reproduces the file byte for byte on the same setup.
 
 How to read these numbers:
-- Logistic Regression's low recall fits the label structure. HDF, PWF and OSF are interaction / product rules (e.g. torque × rpm, wear × torque), which a linear model on raw features cannot represent.
-- The Random Forest misses 5 of 30 failures. That is consistent with the unmodelled `Type`, TWF and RNF parts described in §2b.
+- The derived features are essentially UCI's own rule inputs, so the improvement shows a model recovering rules behind a synthetic label. It says nothing about real machines.
+- On the unseen rows the saved model catches all 66 HDF, 58 PWF and 55 OSF failures, 6 of 22 TWF and 0 of 19 RNF. One row can have several modes. TWF and RNF are partly or fully random, which limits achievable recall.
+- `Type` is still dropped. Adding it made no clear difference in testing, and it would change the dataset and add a required input.
 - Accuracy is not a useful headline: predicting "normal" for every row already scores 0.85 here.

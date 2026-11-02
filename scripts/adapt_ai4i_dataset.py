@@ -11,6 +11,7 @@ Third International Conference on Artificial Intelligence for Industries (AI4I 2
 UCI ML Repository: https://archive.ics.uci.edu/ml/machine-learning-databases/00601/ai4i2020.csv
 """
 
+import hashlib
 import io
 from pathlib import Path
 import urllib.request
@@ -18,15 +19,31 @@ import numpy as np
 import pandas as pd
 
 UCI_AI4I_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/00601/ai4i2020.csv"
+RAW_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "ai4i2020.csv"
+RAW_CSV_SHA256 = "dc6630cd9b1f0f853922fad78a1b6436570d3f1ec863f1dd5c4340ac56bc8a8e"
 
 
-def fetch_raw_ai4i(url: str = UCI_AI4I_URL) -> pd.DataFrame:
-    """Download the raw AI4I 2020 CSV dataset from UCI."""
-    print(f"Downloading raw dataset from: {url}")
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req) as resp:
-        content = resp.read().decode("utf-8")
-    return pd.read_csv(io.StringIO(content))
+def fetch_raw_ai4i(url: str = UCI_AI4I_URL, raw_path: Path = RAW_CSV_PATH) -> pd.DataFrame:
+    """Read the raw AI4I 2020 CSV from the local copy, downloading it from UCI only if missing."""
+    raw_path = Path(raw_path)
+    downloaded = not raw_path.exists()
+    if downloaded:
+        print(f"Downloading raw dataset from: {url}")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req) as resp:
+            content = resp.read()
+    else:
+        content = raw_path.read_bytes()
+
+    # A changed source would silently change the generated dataset, so refuse it.
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != RAW_CSV_SHA256:
+        raise ValueError(f"AI4I raw data checksum mismatch: expected {RAW_CSV_SHA256}, got {digest}")
+
+    if downloaded:
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_bytes(content)
+    return pd.read_csv(io.BytesIO(content))
 
 
 def adapt_to_manufacturing_schema(

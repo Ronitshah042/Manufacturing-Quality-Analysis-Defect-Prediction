@@ -16,17 +16,16 @@ Usage Examples:
 """
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 import joblib
 import numpy as np
 import pandas as pd
 
-# Support execution both as script and module
-try:
-    from src.pipeline import TELEMETRY_FEATURES
-except ModuleNotFoundError:
-    from pipeline import TELEMETRY_FEATURES
+# The saved model refers to src.pipeline by name, so that import must work however this file is run.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.pipeline import FAILURE_THRESHOLD, TELEMETRY_FEATURES, failure_probabilities, predict_failure
 
 DEFAULT_MODEL_PATH = "models/defect_pipeline.joblib"
 
@@ -95,17 +94,11 @@ def predict_machine_failure(
         columns=TELEMETRY_FEATURES,
     )
 
-    pred_raw = pipeline.predict(input_data)[0]
-    is_failure = bool(pred_raw == 1)
+    is_failure = bool(predict_failure(pipeline, input_data)[0] == 1)
 
     prob_failure = None
-    if hasattr(pipeline, "predict_proba"):
-        probs = pipeline.predict_proba(input_data)[0]
-        classes = list(pipeline.classes_)
-        if 1 in classes:
-            prob_failure = float(probs[classes.index(1)])
-        elif True in classes:
-            prob_failure = float(probs[classes.index(True)])
+    if hasattr(pipeline, "predict_proba") and 1 in list(pipeline.classes_):
+        prob_failure = float(failure_probabilities(pipeline, input_data)[0])
 
     return {
         "failure": is_failure,
@@ -249,6 +242,7 @@ def main():
     print(f"Failure Flag:        {res['failure']}")
     if res["failure_probability"] is not None:
         print(f"Failure Probability: {res['failure_probability'] * 100:.1f}%")
+    print(f"Flagged At or Above: {FAILURE_THRESHOLD * 100:.0f}%")
     print("------------------------------------------------\n")
 
 
