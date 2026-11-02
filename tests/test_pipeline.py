@@ -323,6 +323,18 @@ class TestManufacturingPipeline(unittest.TestCase):
             self.assertEqual(res["failure"], expected)
             self.assertAlmostEqual(res["failure_probability"], probability)
 
+    def test_model_without_probabilities_uses_plain_prediction(self):
+        """A model with no predict_proba must still predict, and report no probability."""
+        class NoProbability:
+            classes_ = np.array([0, 1])
+
+            def predict(self, X):
+                return np.array([1])
+
+        res = predict_machine_failure(300, 310, 1500, 40, 100, pipeline=NoProbability())
+        self.assertTrue(res["failure"])
+        self.assertIsNone(res["failure_probability"])
+
     def test_unseen_rows_exclude_training_sample(self):
         """The unseen check must use only raw UCI rows outside the training sample."""
         sample = REPO_ROOT / "manufacturing_samples.csv"

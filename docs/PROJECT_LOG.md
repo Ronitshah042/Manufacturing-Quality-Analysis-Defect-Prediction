@@ -131,7 +131,7 @@ AI_Learning/
 │   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (derived features + imputer + scaler + Random Forest)
 ├── tests/
 │   ├── __init__.py
-│   └── test_pipeline.py              # 16 unit tests covering telemetry pipeline, derived features, threshold, imputation, serialization, predictions, cross-validation, saved model, and dataset regeneration
+│   └── test_pipeline.py              # 17 unit tests covering telemetry pipeline, derived features, threshold, imputation, serialization, predictions, cross-validation, saved model, and dataset regeneration
 ├── docs/
 │   ├── DATASET_CARD.md               # Source vs generated data distinction & synthetic leakage card
 │   └── PROJECT_LOG.md                # Comprehensive project documentation and logs
@@ -155,7 +155,7 @@ AI_Learning/
   * CLI: `python3 src/predict.py --air_temp 298.1 --process_temp 308.6 --rpm 1551 --torque 42.8 --tool_wear 0`. Omitted flags fall back to defaults; an explicit `0` is kept.
   * Demo mode: `python3 src/predict.py` (5 operating scenarios).
 * **`tests/test_pipeline.py`**:
-  * Unit test suite using standard library `unittest` (16 tests).
+  * Unit test suite using standard library `unittest` (17 tests).
 
 ---
 
@@ -180,6 +180,7 @@ test_generator_reproduces_tracked_dataset_offline ... ok
 test_interaction_features_match_uci_formulas ... ok
 test_interaction_pipeline_handles_missing_sensor ... ok
 test_missing_value_imputation ... ok
+test_model_without_probabilities_uses_plain_prediction ... ok
 test_pipeline_serialization_and_reload ... ok
 test_pipeline_structure ... ok
 test_predict_machine_failure_function ... ok
@@ -187,7 +188,7 @@ test_tracked_model_loads_and_predicts ... ok
 test_unseen_rows_exclude_training_sample ... ok
 
 ----------------------------------------------------------------------
-Ran 16 tests
+Ran 17 tests
 
 OK
 ```
@@ -210,7 +211,7 @@ python3 src/predict.py
 * Fresh cutting tool, moderate cut $\implies$ `NORMAL OPERATION` (Failure Prob: 0.0%)
 * Critical tool wear breakdown (TWF) $\implies$ `MACHINE FAILURE RISK` (Failure Prob: 75.3%)
 * Overstrain cutting load (OSF) $\implies$ `MACHINE FAILURE RISK` (Failure Prob: 95.0%)
-* Heat dissipation failure (HDF) $\implies$ `MACHINE FAILURE RISK`
+* Heat dissipation failure (HDF) $\implies$ `MACHINE FAILURE RISK` (Failure Prob: 89.7%)
 
 ### Command 4: Custom Sensor CLI Predictions
 ```bash

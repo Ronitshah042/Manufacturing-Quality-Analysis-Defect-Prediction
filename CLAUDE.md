@@ -9,7 +9,7 @@ Run everything from the repo root, because data and model paths are relative to 
 Use `.venv/bin/python` (Python 3.15, pinned dependencies). A bare `python3` has no dependencies installed. If `.venv` is missing, create it: `python3.15 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v        # 16 tests; pytest is not installed
+.venv/bin/python -m unittest discover -s tests -v        # 17 tests; pytest is not installed
 .venv/bin/python -m unittest tests.test_pipeline.TestManufacturingPipeline.test_pipeline_structure  # one test
 .venv/bin/python src/predict.py                          # demo scenarios
 .venv/bin/python src/predict.py --rpm 1280 --torque 69.8 --tool_wear 195  # omitted flags use defaults
