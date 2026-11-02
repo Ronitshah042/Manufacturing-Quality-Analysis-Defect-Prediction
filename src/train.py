@@ -1,23 +1,26 @@
 """
 Model Training and Evaluation Script (Track 1: AI4I 2020 Sensor Columns)
 ========================================================================
-Trains baseline Decision Tree, Logistic Regression, and Random Forest
-models using the original UCI AI4I 2020 sensor columns to predict
-source_machine_failure. AI4I 2020 is itself a synthetic benchmark whose
+Trains Decision Tree, Logistic Regression, and Random Forest models on the
+original UCI AI4I 2020 sensor columns plus three interaction features, to
+predict source_machine_failure. AI4I 2020 is itself a synthetic benchmark whose
 failure label is generated from rules on these sensors (see docs/DATASET_CARD.md).
 
-Evaluates failure recall, precision, F1-score, and confusion matrices
-on unseen test data, and saves the fitted pipeline.
+Evaluates failure recall, precision, F1-score, and confusion matrices on a test
+split, with repeated cross-validation, and on raw UCI rows outside the training
+sample. Saves the fitted Random Forest pipeline.
 
 Usage:
 ------
 python3 src/train.py
 """
 
+import sys
 from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -27,14 +30,19 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import RepeatedStratifiedKFold, cross_validate, train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
-# Support execution both as script and module
-try:
-    from src.pipeline import create_pipeline, load_and_clean_data, TELEMETRY_FEATURES, TELEMETRY_TARGET
-except ModuleNotFoundError:
-    from pipeline import create_pipeline, load_and_clean_data, TELEMETRY_FEATURES, TELEMETRY_TARGET
+# The saved model refers to src.pipeline by name, so that import must work however this file is run.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.pipeline import (
+    FAILURE_THRESHOLD,
+    TELEMETRY_TARGET,
+    create_pipeline,
+    load_and_clean_data,
+    load_unseen_ai4i,
+    predict_failure,
+)
 
 
 def evaluate_model(
@@ -44,6 +52,7 @@ def evaluate_model(
     y_test: pd.Series,
     X_train: pd.DataFrame = None,
     y_train: pd.Series = None,
+    threshold: float = FAILURE_THRESHOLD,
 ) -> dict:
     """
     Compute training accuracy (if provided), test accuracy, precision, recall, F1, and confusion matrix.
@@ -51,11 +60,11 @@ def evaluate_model(
     # 1. Training metrics (measures learning fit)
     train_acc = None
     if X_train is not None and y_train is not None:
-        y_train_pred = pipeline.predict(X_train)
+        y_train_pred = predict_failure(pipeline, X_train, threshold)
         train_acc = accuracy_score(y_train, y_train_pred)
 
     # 2. Test metrics (measures generalization to unseen data)
-    y_pred = pipeline.predict(X_test)
+    y_pred = predict_failure(pipeline, X_test, threshold)
     acc = accuracy_score(y_test, y_pred)
     prec = precision_score(y_test, y_pred, zero_division=0)
     rec = recall_score(y_test, y_pred, zero_division=0)
@@ -93,6 +102,32 @@ def print_evaluation(metrics: dict):
     print("                  Predicted Normal  Predicted Failure")
     print(f"Actual Normal         {tn:<17} {fp:<10} (False Alarms: {fp})")
     print(f"Actual Failure        {fn:<17} {tp:<10} (Missed Failures: {fn})")
+
+
+def cross_validate_failure_metrics(
+    pipeline,
+    X,
+    y,
+    n_splits: int = 5,
+    n_repeats: int = 5,
+    random_state: int = 42,
+    threshold: float = FAILURE_THRESHOLD,
+) -> dict:
+    """
+    Score an unfitted pipeline on repeated stratified folds, refitting it per fold.
+    Returns per-fold arrays for precision, recall, and F1 at the given threshold.
+    """
+    def scorer(estimator, X_fold, y_fold):
+        y_pred = predict_failure(estimator, X_fold, threshold)
+        return {
+            "precision": precision_score(y_fold, y_pred, zero_division=0),
+            "recall": recall_score(y_fold, y_pred, zero_division=0),
+            "f1": f1_score(y_fold, y_pred, zero_division=0),
+        }
+
+    folds = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=random_state)
+    scores = cross_validate(pipeline, X, y, cv=folds, scoring=scorer)
+    return {name: scores[f"test_{name}"] for name in ("precision", "recall", "f1")}
 
 
 def train_and_evaluate(
@@ -134,7 +169,7 @@ def train_and_evaluate(
     candidate_classifiers = {
         "Baseline Decision Tree": DecisionTreeClassifier(random_state=random_state),
         "Logistic Regression": LogisticRegression(random_state=random_state, max_iter=1000),
-        "Random Forest (50 trees)": RandomForestClassifier(n_estimators=50, random_state=random_state),
+        "Random Forest (300 trees)": RandomForestClassifier(n_estimators=300, random_state=random_state),
     }
 
     results = []
@@ -142,7 +177,7 @@ def train_and_evaluate(
 
     for name, clf in candidate_classifiers.items():
         # Pipeline ensures SimpleImputer and StandardScaler are fitted ONLY on X_train
-        pipe = create_pipeline(classifier=clf, include_scaler=True, random_state=random_state)
+        pipe = create_pipeline(classifier=clf, include_scaler=True, random_state=random_state, include_interactions=True)
         pipe.fit(X_train, y_train)
         fitted_pipelines[name] = pipe
 
@@ -167,6 +202,26 @@ def train_and_evaluate(
     ])
     print(summary_df.to_string(index=False))
 
+    # Cross-validation on all rows, since one test split has only 30 failures
+    print(f"\nFailure threshold: {FAILURE_THRESHOLD}")
+    print(f"5-FOLD CROSS-VALIDATION REPEATED 5 TIMES ON ALL {n_total} ROWS (mean ± std across folds)")
+    cv_candidates = [
+        (name, clone(clf), True, FAILURE_THRESHOLD) for name, clf in candidate_classifiers.items()
+    ] + [
+        ("Old: RF (50), sensors, t=0.5", RandomForestClassifier(n_estimators=50, random_state=random_state), False, 0.5),
+    ]
+    for name, clf, interactions, threshold in cv_candidates:
+        cv = cross_validate_failure_metrics(
+            create_pipeline(classifier=clf, include_scaler=True, random_state=random_state, include_interactions=interactions),
+            X, y, random_state=random_state, threshold=threshold,
+        )
+        print(
+            f"  {name:<29} "
+            f"Precision {cv['precision'].mean():.3f} ± {cv['precision'].std():.3f}  "
+            f"Recall {cv['recall'].mean():.3f} ± {cv['recall'].std():.3f}  "
+            f"F1 {cv['f1'].mean():.3f} ± {cv['f1'].std():.3f}"
+        )
+
     # Analytical Insights
     print("\n[4/5] Analytical Insights & Engineering Takeaways:")
     print("  * Interpretation caveat:")
@@ -186,13 +241,19 @@ def train_and_evaluate(
     print(f"\n[5/5] Serializing fitted Random Forest pipeline to: {model_save_path}")
     save_path = Path(model_save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    best_pipe = fitted_pipelines["Random Forest (50 trees)"]
-    joblib.dump(best_pipe, save_path)
+    best_pipe = fitted_pipelines["Random Forest (300 trees)"]
+    joblib.dump(best_pipe, save_path, compress=3)
     print("      Pipeline successfully serialized.")
+
+    # Reporting only: choosing models or thresholds on these rows would make this check optimistic.
+    X_unseen, y_unseen = load_unseen_ai4i(data_path)
+    unseen_metrics = evaluate_model("Saved model on unseen UCI rows", best_pipe, X_unseen, y_unseen)
+    print(f"\n      {len(X_unseen)} raw UCI rows outside the sample, failure rate {y_unseen.mean() * 100:.2f}%:")
+    print_evaluation(unseen_metrics)
 
     # Verify reloading
     reloaded_pipe = joblib.load(save_path)
-    reloaded_pred = reloaded_pipe.predict(X_test)
+    reloaded_pred = predict_failure(reloaded_pipe, X_test)
     assert np.array_equal(results[2]["predictions"], reloaded_pred), "Reloaded model output mismatch!"
     print("      Verification passed: Reloaded pipeline predictions match in-memory model identically.")
 

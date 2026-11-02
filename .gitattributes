@@ -1,0 +1,3 @@
+# Checked byte for byte by the generator and tests, so git must not change line endings.
+data/raw/ai4i2020.csv -text
+manufacturing_samples.csv -text
