@@ -17,3 +17,6 @@ env/
 
 # Editor settings
 .vscode/
+
+# Streamlit secrets (none are needed, but never commit them)
+.streamlit/secrets.toml

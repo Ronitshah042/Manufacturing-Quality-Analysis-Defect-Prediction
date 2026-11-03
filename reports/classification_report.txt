@@ -1,0 +1,23 @@
+Saved model: models/defect_pipeline.joblib
+Failure flagged at probability >= 0.4
+AI4I 2020 is synthetic; these scores do not show real-factory performance.
+
+Test split (n = 200, 30 failures)
+              precision    recall  f1-score   support
+
+      normal      0.977     0.994     0.985       170
+     failure      0.963     0.867     0.912        30
+
+    accuracy                          0.975       200
+   macro avg      0.970     0.930     0.949       200
+weighted avg      0.975     0.975     0.974       200
+
+Unseen UCI rows (n = 9,000, 189 failures)
+              precision    recall  f1-score   support
+
+      normal      0.998     0.976     0.987      8811
+     failure      0.447     0.894     0.596       189
+
+    accuracy                          0.975      9000
+   macro avg      0.722     0.935     0.791      9000
+weighted avg      0.986     0.975     0.979      9000

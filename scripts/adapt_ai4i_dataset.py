@@ -22,6 +22,12 @@ UCI_AI4I_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/00601/
 RAW_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "ai4i2020.csv"
 RAW_CSV_SHA256 = "dc6630cd9b1f0f853922fad78a1b6436570d3f1ec863f1dd5c4340ac56bc8a8e"
 
+# Track 2 quality rule. The Streamlit part inspection imports these, so both use one definition.
+NOMINAL_LENGTH_MM = 100.0
+NOMINAL_WEIGHT_G = 250.0
+TOLERANCE_LIMIT_MM = 0.12
+WEIGHT_LIMIT_G = 7.0
+
 
 def fetch_raw_ai4i(url: str = UCI_AI4I_URL, raw_path: Path = RAW_CSV_PATH) -> pd.DataFrame:
     """Read the raw AI4I 2020 CSV from the local copy, downloading it from UCI only if missing."""
@@ -85,7 +91,7 @@ def adapt_to_manufacturing_schema(
     tol_dev[fail_mask] += np.random.choice([-1, 1], size=fail_mask.sum()) * np.random.uniform(0.12, 0.25, size=fail_mask.sum())
     tol_dev = np.round(tol_dev, 4)
 
-    length_mm = np.round(100.00 + tol_dev, 4)
+    length_mm = np.round(NOMINAL_LENGTH_MM + tol_dev, 4)
 
     # 4. Model Part Weight:
     # Torque and RPM variance alter the Material Removal Rate (MRR).
@@ -105,7 +111,12 @@ def adapt_to_manufacturing_schema(
     # 6. Quality Label (Defective):
     # Part fails QA if machine experienced catastrophic failure OR if physical dimensions
     # breach quality engineering limits (tolerance > 0.12 mm or mass drift > 7.0 g).
-    defective = fail_mask | (np.abs(tol_dev) > 0.12) | (np.abs(weight_g - 250.0) > 7.0)
+    # A missing weight compares as False, so it never triggers the weight rule.
+    defective = (
+        fail_mask
+        | (np.abs(tol_dev) > TOLERANCE_LIMIT_MM)
+        | (np.abs(weight_g - NOMINAL_WEIGHT_G) > WEIGHT_LIMIT_G)
+    )
 
     # 7. Map Failure Type
     failure_type = np.where(df["TWF"] == 1, "Tool Wear",

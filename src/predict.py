@@ -29,6 +29,15 @@ from src.pipeline import FAILURE_THRESHOLD, TELEMETRY_FEATURES, failure_probabil
 
 DEFAULT_MODEL_PATH = "models/defect_pipeline.joblib"
 
+# Example sensor readings for the demo and the app presets. Results come from the model, never from here.
+DEMO_SCENARIOS = [
+    {"desc": "Nominal milling operation", "air": 298.2, "proc": 308.7, "rpm": 1500, "torque": 40.0, "wear": 40},
+    {"desc": "Fresh cutting tool, moderate cut", "air": 299.1, "proc": 309.4, "rpm": 1620, "torque": 35.5, "wear": 12},
+    {"desc": "Critical tool wear breakdown (TWF)", "air": 300.4, "proc": 310.8, "rpm": 1410, "torque": 52.0, "wear": 235},
+    {"desc": "Overstrain cutting load (OSF)", "air": 301.2, "proc": 311.5, "rpm": 1280, "torque": 69.8, "wear": 195},
+    {"desc": "Heat dissipation failure (HDF: ΔT < 8.6K, RPM < 1380)", "air": 302.5, "proc": 310.4, "rpm": 1340, "torque": 55.0, "wear": 180},
+]
+
 
 def load_model(model_path: str = DEFAULT_MODEL_PATH):
     """
@@ -141,34 +150,11 @@ def run_demo_predictions(pipeline=None):
     print(" PREDICTIVE MAINTENANCE INSPECTOR: INDUSTRIAL SCENARIOS RUN")
     print("=" * 76)
 
-    test_cases = [
-        {
-            "desc": "Nominal milling operation",
-            "air": 298.2, "proc": 308.7, "rpm": 1500, "torque": 40.0, "wear": 40,
-        },
-        {
-            "desc": "Fresh cutting tool, moderate cut",
-            "air": 299.1, "proc": 309.4, "rpm": 1620, "torque": 35.5, "wear": 12,
-        },
-        {
-            "desc": "Critical tool wear breakdown (TWF)",
-            "air": 300.4, "proc": 310.8, "rpm": 1410, "torque": 52.0, "wear": 235,
-        },
-        {
-            "desc": "Overstrain cutting load (OSF)",
-            "air": 301.2, "proc": 311.5, "rpm": 1280, "torque": 69.8, "wear": 195,
-        },
-        {
-            "desc": "Heat dissipation failure (HDF: ΔT < 8.6K, RPM < 1380)",
-            "air": 302.5, "proc": 310.4, "rpm": 1340, "torque": 55.0, "wear": 180,
-        },
-    ]
-
     if pipeline is None:
         pipeline = load_model(DEFAULT_MODEL_PATH)
 
     results = []
-    for case in test_cases:
+    for case in DEMO_SCENARIOS:
         res = predict_machine_failure(
             air_temperature_k=case["air"],
             process_temperature_k=case["proc"],

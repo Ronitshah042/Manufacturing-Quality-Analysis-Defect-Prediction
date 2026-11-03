@@ -101,18 +101,18 @@ plt.scatter(
 )
 
 # 3. Add visual quality threshold limits
-# Tolerance deviation limit at 0.10 mm
+# These match the label rule in scripts/adapt_ai4i_dataset.py: |tol_dev| > 0.12 mm or |weight - 250| > 7 g
 plt.axhline(
-    y=0.10, 
-    color="darkorange", 
-    linestyle="--", 
-    linewidth=1.5, 
-    label="Tolerance Boundary (0.10 mm)"
+    y=0.12,
+    color="darkorange",
+    linestyle="--",
+    linewidth=1.5,
+    label="Tolerance Boundary (0.12 mm)"
 )
 
-# Weight limits at 248.0 g and 252.0 g
-plt.axvline(x=248.0, color="gray", linestyle=":", linewidth=1.2, label="Weight Spec Limits (248g / 252g)")
-plt.axvline(x=252.0, color="gray", linestyle=":", linewidth=1.2)
+# Weight limits at 243.0 g and 257.0 g
+plt.axvline(x=243.0, color="gray", linestyle=":", linewidth=1.2, label="Weight Spec Limits (243g / 257g)")
+plt.axvline(x=257.0, color="gray", linestyle=":", linewidth=1.2)
 
 # 4. Add labels, units, title, legend, and grid
 plt.title("Quality Inspection Map: Weight vs. Absolute Tolerance Deviation", fontsize=13, fontweight="bold")

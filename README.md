@@ -18,6 +18,22 @@ This repository investigates two distinct manufacturing prediction paradigms:
 
 ---
 
+## 🖥️ Streamlit App
+
+A five-page dashboard (`app.py`) wraps the existing code. It never trains a model: it loads the saved pipeline once and reads the files in `reports/`.
+
+| Page | What it does |
+| :--- | :--- |
+| **Overview** | Introduces both workflows and shows the saved model's results on unseen rows, read from `reports/metrics.json` |
+| **Predictive Maintenance** | Takes five validated sensor readings and returns the saved model's failure prediction and probability, through the same `predict_machine_failure` the CLI uses. Example presets are sample readings only. |
+| **Part Quality Inspection** | Applies the Track 2 label rule (machine failure, or \|tolerance deviation\| > 0.12 mm, or \|weight − 250 g\| > 7 g) using the generator's own constants. It's a deterministic rule, not a model. |
+| **Analytics & Evaluation** | Train-split, test-split and unseen-row metrics, confusion matrices, the classification report, feature importance and EDA figures |
+| **About the Project** | Data provenance, pipeline, evaluation method and limitations |
+
+Every page carries a synthetic-data notice. Probabilities are model estimates, not calibrated real-world risks. To run the app, follow the setup steps in Quickstart below, then run `streamlit run app.py`.
+
+---
+
 ## 🔬 Source Data vs. Project-Generated Measurements
 
 ```
@@ -110,6 +126,9 @@ AI_Learning/
 ├── products.csv                      # Preserved practice data
 ├── quality_report.csv                # Preserved analysis output
 ├── requirements.txt                  # Pinned Python dependencies
+├── app.py                            # Streamlit entry point and navigation
+├── app_pages/                        # One file per app page, plus shared helpers (common.py)
+├── .streamlit/config.toml            # App theme
 │
 ├── data/raw/
 │   └── ai4i2020.csv                  # Unmodified UCI source file (CC BY 4.0), checksum-verified
@@ -121,17 +140,23 @@ AI_Learning/
 │   ├── __init__.py
 │   ├── pipeline.py                   # Data loader, deduplication, Pipeline factory
 │   ├── train.py                      # Train, evaluate, compare models, serialize pipeline
-│   └── predict.py                    # Inference module, CLI, and demonstration runner
+│   ├── predict.py                    # Inference module, CLI, and demonstration runner
+│   ├── report.py                     # Writes EDA and evaluation artifacts to reports/
+│   └── app_logic.py                  # App input validation, part-inspection rule, safe loading (no Streamlit)
 │
 ├── models/
 │   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (derived features + imputer + scaler + Random Forest)
 │
 ├── tests/
 │   ├── __init__.py
-│   └── test_pipeline.py              # Unit tests for preprocessing, pipeline, and prediction
+│   ├── test_pipeline.py              # Unit tests for preprocessing, pipeline, prediction, and reports
+│   └── test_app.py                   # App logic tests and headless runs of every page
+│
+├── reports/                          # EDA and evaluation figures and tables (src/report.py)
 │
 ├── docs/
 │   ├── DATASET_CARD.md               # Formal dataset documentation & physics modeling card
+│   ├── EVALUATION.md                 # How to read each figure and table in reports/
 │   └── PROJECT_LOG.md                # Comprehensive project log, decisions, and leakage analysis
 │
 ├── manufacturing_data_analysis.py    # Preserved exploratory analysis & Pandas exercises
@@ -147,28 +172,38 @@ AI_Learning/
 
 ## 🚀 Quickstart & Usage
 
-### 1. Installation
+### 1. Installation (macOS)
 Clone the repository, then install the pinned dependencies in a virtual environment. Use Python 3.15, the version these pins and the saved model were verified on:
 ```bash
+git clone https://github.com/Ronitshah042/ai-learning.git
+cd ai-learning
 python3.15 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 Run the commands below from the repository root with the environment active.
 
-### 2. Run Unit Tests
-Execute the automated test suite covering imputation, deduplication, serialization, predictions, the saved model, and dataset regeneration:
+**In VS Code:** open the repository folder, then choose **Python: Select Interpreter** from the Command Palette (⇧⌘P) and pick `./.venv/bin/python`. New terminals then activate the environment automatically.
+
+### 2. Run the Streamlit App
+```bash
+streamlit run app.py
+```
+It opens at http://localhost:8501. Stop it with Ctrl+C.
+
+### 3. Run Unit Tests
+Execute the automated test suite. It covers the pipeline, predictions, the saved model, dataset regeneration, the report files, the app's validation and rule logic, and a headless run of every app page:
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-### 3. Train & Evaluate Models
+### 4. Train & Evaluate Models
 Train the baseline pipeline, compare against Logistic Regression and Random Forest, and save the fitted model:
 ```bash
 python3 src/train.py
 ```
 
-### 4. Run Predictive Maintenance Inspections
+### 5. Run Predictive Maintenance Inspections
 Predict machine failure risk using the serialized pipeline:
 
 **Run the built-in industrial demonstration suite**:
@@ -190,14 +225,25 @@ python3 src/predict.py --air_temp 300.4 --process_temp 310.8 --rpm 1410 --torque
 
 ---
 
-## 📈 Exploratory Visualizations
+## 📈 EDA and Evaluation Report
 
-To regenerate the dimensional box plots and quality inspection scatter plots:
+To write the Track 1 figures and tables to `reports/`:
+```bash
+python3 src/report.py
+```
+* `eda_sensor_distributions.png`: each model input, normal runs vs. failures.
+* `eda_failure_rules.png`: the UCI power and overstrain rules drawn over the data.
+* `confusion_matrix.png` and `classification_report.txt`: results on the test split and the unseen UCI rows.
+* `feature_importance.png` and `feature_importance.csv`: permutation and impurity importance.
+
+[docs/EVALUATION.md](docs/EVALUATION.md) shows each figure and explains how to read it.
+
+To regenerate the Track 2 dimension plots, which show the generated columns and the label rule's limits:
 ```bash
 python3 manufacturing_visualizations.py
 ```
 * `manufacturing_dimension_boxplots.png`: 4-panel distribution comparison for weight, length, width, and height.
-* `manufacturing_scatter_plot.png`: Multi-variable inspection map showing tolerance boundaries and weight limits.
+* `manufacturing_scatter_plot.png`: inspection map with the 0.12 mm tolerance and 243–257 g weight limits.
 
 ---
 
@@ -205,7 +251,22 @@ python3 manufacturing_visualizations.py
 
 * **Language**: Python 3.15
 * **Data Processing**: Pandas, NumPy
-* **Machine Learning**: Scikit-learn (Pipelines, Decision Trees, SimpleImputer, Metrics)
-* **Visualization**: Matplotlib
+* **Machine Learning**: Scikit-learn (Pipelines, Random Forest, SimpleImputer, Metrics)
+* **Visualization**: Matplotlib, Altair
+* **App**: Streamlit
 * **Serialization**: Joblib
-* **Testing**: Python standard library `unittest`
+* **Testing**: Python standard library `unittest`, Streamlit `AppTest`, GitHub Actions
+
+---
+
+## ☁️ Deploying to Streamlit Community Cloud
+
+The repository is ready to deploy: `app.py` is at the root, `requirements.txt` pins every dependency, and the model and report files are committed. It isn't deployed yet. To deploy:
+
+1. Push the latest code to GitHub.
+2. Sign in at https://share.streamlit.io with your GitHub account and choose **Create app**.
+3. Select the `ai-learning` repository, branch `main`, and main file `app.py`.
+4. Under **Advanced settings**, choose Python 3.15. The saved model was built with the pinned scikit-learn on Python 3.15. If 3.15 isn't offered, pick the closest version, then retrain and rerun the tests on that version before deploying.
+5. Choose **Deploy**. The app needs no secrets.
+
+`.streamlit/config.toml` sets the theme. Cloud uses it automatically.

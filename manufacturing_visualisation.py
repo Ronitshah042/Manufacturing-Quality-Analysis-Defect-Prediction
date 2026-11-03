@@ -51,13 +51,13 @@ plt.scatter(
     edgecolors="black"
 )
 
-# Add tolerance warning boundary line (e.g. at 0.10 mm)
+# Add the tolerance limit used by the label rule in scripts/adapt_ai4i_dataset.py
 plt.axhline(
-    y=0.10,
+    y=0.12,
     color="darkorange",
     linestyle="--",
     linewidth=1.5,
-    label="Tolerance Threshold (0.10 mm)"
+    label="Tolerance Threshold (0.12 mm)"
 )
 
 # Add titles and labels with physical units
