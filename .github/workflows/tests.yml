@@ -9,11 +9,9 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    # Linux only: hosted macOS runners were repeatedly unavailable, which cancelled the job before it started.
+    # The suite is also run locally on macOS before every push.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
