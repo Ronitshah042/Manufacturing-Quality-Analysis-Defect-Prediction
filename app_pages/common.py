@@ -12,7 +12,7 @@ from src.app_logic import (
     training_ranges,
 )
 
-GITHUB_URL = "https://github.com/Ronitshah042/ai-learning"
+GITHUB_URL = "https://github.com/Ronitshah042/Manufacturing-Quality-Analysis-Defect-Prediction"
 DOCS_URL = f"{GITHUB_URL}/blob/main/docs"
 
 CSS = """

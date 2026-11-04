@@ -1,5 +1,7 @@
 # Predictive Maintenance & Manufacturing Quality Analysis
 
+**Live app:** [https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app](https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app)
+
 A reproducible, modular Python machine learning workflow for industrial predictive maintenance and quality inspection, built using the [UCI AI4I 2020 Predictive Maintenance Dataset](https://archive.ics.uci.edu/ml/machine-learning-databases/00601/ai4i2020.csv) (Matzka 2020).
 
 ---
@@ -30,7 +32,9 @@ A five-page dashboard (`app.py`) wraps the existing code. It never trains a mode
 | **Analytics & Evaluation** | Train-split, test-split and unseen-row metrics, confusion matrices, the classification report, feature importance and EDA figures |
 | **About the Project** | Data provenance, pipeline, evaluation method and limitations |
 
-Every page carries a synthetic-data notice. Probabilities are model estimates, not calibrated real-world risks. To run the app, follow the setup steps in Quickstart below, then run `streamlit run app.py`.
+Every page carries a synthetic-data notice. Probabilities are model estimates, not calibrated real-world risks.
+
+**Try it live:** [https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app](https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app). It's hosted free on Streamlit Community Cloud. If the app has gone to sleep, click the wake-up button and allow about a minute. To run it locally, follow the setup steps in Quickstart below, then run `streamlit run app.py`.
 
 ---
 
@@ -175,8 +179,8 @@ AI_Learning/
 ### 1. Installation (macOS)
 Clone the repository, then install the pinned dependencies in a virtual environment. Use Python 3.15, the version these pins and the saved model were verified on:
 ```bash
-git clone https://github.com/Ronitshah042/ai-learning.git
-cd ai-learning
+git clone https://github.com/Ronitshah042/Manufacturing-Quality-Analysis-Defect-Prediction.git
+cd Manufacturing-Quality-Analysis-Defect-Prediction
 python3.15 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -261,12 +265,14 @@ python3 manufacturing_visualizations.py
 
 ## ☁️ Deploying to Streamlit Community Cloud
 
-The repository is ready to deploy: `app.py` is at the root, `requirements.txt` pins every dependency, and the model and report files are committed. It isn't deployed yet. To deploy:
+The app is deployed at [https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app](https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app) from the `main` branch, so every push to `main` redeploys it automatically. To deploy your own copy:
 
 1. Push the latest code to GitHub.
 2. Sign in at https://share.streamlit.io with your GitHub account and choose **Create app**.
-3. Select the `ai-learning` repository, branch `main`, and main file `app.py`.
+3. Select the repository, branch `main`, and main file `app.py`. The repository must be public, or Streamlit must be given access to private repositories.
 4. Under **Advanced settings**, choose Python 3.15. The saved model was built with the pinned scikit-learn on Python 3.15. If 3.15 isn't offered, pick the closest version, then retrain and rerun the tests on that version before deploying.
 5. Choose **Deploy**. The app needs no secrets.
 
 `.streamlit/config.toml` sets the theme. Cloud uses it automatically.
+
+Free apps sleep after a period without visitors. `.github/workflows/keep-awake.yml` opens the live app in a headless browser every 6 hours using `scripts/keep_awake.py`, wakes it if needed, and fails, which sends you an email, if the app doesn't load.

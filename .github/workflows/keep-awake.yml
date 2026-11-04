@@ -1,0 +1,23 @@
+name: Keep app awake
+
+# Free Streamlit apps sleep after a period without visitors. This opens the live app
+# in a browser every 6 hours, wakes it if needed, and fails if it doesn't load.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+      - run: pip install playwright==1.64.1 && python -m playwright install --with-deps chromium
+      - run: python scripts/keep_awake.py

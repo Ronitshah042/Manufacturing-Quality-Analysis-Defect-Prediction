@@ -20,7 +20,9 @@ Use `.venv/bin/python` (Python 3.15, pinned dependencies). A bare `python3` has 
 
 The last two reproduce the tracked files exactly (checked 2 Nov 2026), so any diff after running them means something changed.
 
-`.github/workflows/tests.yml` runs the tests on Linux and macOS for every push and pull request. There is no linter or formatter.
+`.github/workflows/tests.yml` runs the tests on Linux for every push and pull request. macOS was dropped because hosted Mac runners kept being unavailable, so run the suite locally before pushing. `.github/workflows/keep-awake.yml` runs `scripts/keep_awake.py` every 6 hours, which opens the live app in a browser and fails if it doesn't load.
+
+Live app: https://manufacturing-quality-analysis-defect-prediction-mkbvjywxtqkhq.streamlit.app. It deploys automatically from `main`. There is no linter or formatter.
 
 ## Layout
 
