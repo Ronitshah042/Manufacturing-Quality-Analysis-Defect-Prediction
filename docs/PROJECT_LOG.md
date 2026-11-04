@@ -131,9 +131,12 @@ AI_Learning/
 │   └── defect_pipeline.joblib        # Fitted Scikit-learn pipeline (derived features + imputer + scaler + Random Forest)
 ├── tests/
 │   ├── __init__.py
-│   └── test_pipeline.py              # 17 unit tests covering telemetry pipeline, derived features, threshold, imputation, serialization, predictions, cross-validation, saved model, and dataset regeneration
+│   └── test_pipeline.py              # 18 pipeline tests; tests/test_app.py adds 16 app tests covering telemetry pipeline, derived features, threshold, imputation, serialization, predictions, cross-validation, saved model, and dataset regeneration
+├── app.py, app_pages/                # Streamlit app (src/app_logic.py holds its testable logic)
+├── reports/                          # EDA and evaluation figures and tables (src/report.py)
 ├── docs/
 │   ├── DATASET_CARD.md               # Source vs generated data distinction & synthetic leakage card
+│   ├── EVALUATION.md                 # How to read each EDA and evaluation artifact
 │   └── PROJECT_LOG.md                # Comprehensive project documentation and logs
 └── README.md                         # Portfolio documentation for recruiters and engineers
 ```
@@ -155,7 +158,7 @@ AI_Learning/
   * CLI: `python3 src/predict.py --air_temp 298.1 --process_temp 308.6 --rpm 1551 --torque 42.8 --tool_wear 0`. Omitted flags fall back to defaults; an explicit `0` is kept.
   * Demo mode: `python3 src/predict.py` (5 operating scenarios).
 * **`tests/test_pipeline.py`**:
-  * Unit test suite using standard library `unittest` (17 tests).
+  * Unit test suite using standard library `unittest` (18 tests, plus 16 in `tests/test_app.py`).
 
 ---
 
@@ -184,11 +187,12 @@ test_model_without_probabilities_uses_plain_prediction ... ok
 test_pipeline_serialization_and_reload ... ok
 test_pipeline_structure ... ok
 test_predict_machine_failure_function ... ok
+test_report_writes_every_artifact ... ok
 test_tracked_model_loads_and_predicts ... ok
 test_unseen_rows_exclude_training_sample ... ok
 
 ----------------------------------------------------------------------
-Ran 17 tests
+Ran 18 tests
 
 OK
 ```
@@ -238,3 +242,26 @@ For transitioning this portfolio prototype toward production-grade quality inspe
 1. **Acquire Empirical Inspection Data**: Collect at least $500$–$5,000$ real parts with genuine CMM measurements and independent destructive/metallurgical testing logs.
 2. **Incorporate Multi-Sensor Dimensions**: Add `width_mm`, `height_mm`, surface finish ($R_a$), and machine vibration telemetry.
 3. **Drift Monitoring**: Monitor dimensional distribution shift over time to detect CNC tool wear before defects occur.
+
+---
+
+## 8. Streamlit App (3 Nov 2026)
+
+`app.py` adds a five-page dashboard on top of the existing code: Overview, Predictive Maintenance, Part Quality Inspection, Analytics & Evaluation, and About.
+
+**Design decisions**
+* **No training at runtime.** Pages load `models/defect_pipeline.joblib` once with `st.cache_resource` and call the existing `predict_machine_failure`, so predictions use the same pipeline as the CLI and tests. A test patches `fit` to raise an error and confirms every page still runs.
+* **Validation, not substitution.** `src/app_logic.validate_sensor_inputs` rejects missing, non-numeric and implausible values with a message, and warns, without blocking, when a reading falls outside the training data range.
+* **Track 2 is a rule, not a model.** `inspect_part` applies the generator's label rule, using constants now defined once in `scripts/adapt_ai4i_dataset.py`. A test confirms it reproduces the `defective` column on all 1,000 rows. A missing weight never triggers the weight rule, exactly as in the generator.
+* **Metrics come from artifacts.** `src/report.py` now also writes `reports/metrics.json` for the train split, test split and unseen rows. The app reads it and shows a fallback message when a report file is missing.
+
+**ML integrity checks**
+* **Features and target:** the app uses the five Track 1 sensors and `source_machine_failure` target, through the pipeline that derives the three interaction features itself. No project-generated or target-derived column reaches the model.
+* **Splits:** `src/report.py` repeats `src/train.py`'s split (`test_size=0.2`, `random_state=42`, stratified), so its test metrics come from the 200 rows the saved model never saw. A test pins the confusion matrices `[[169, 1], [4, 26]]` (test) and `[[8602, 209], [20, 169]]` (unseen).
+* **Unseen rows:** `load_unseen_ai4i` returns the raw UCI rows whose IDs are not in the training file, and a test confirms there's no overlap. They come from the same synthetic generator, so they're new rows, not independent evidence.
+* **Feature names:** feature importance uses the saved model's own input names, read from its fitted imputer.
+* **No tuning:** the model and threshold were not changed for the app.
+
+**Verification**
+* **Tests:** 34 pass: 18 for the pipeline and 16 for the app, including a headless run of every page with `streamlit.testing.v1.AppTest`.
+* **Browser check:** the app was run with `streamlit run` and captured in headless Chrome at desktop width and 390 px phone width, with the maintenance and inspection forms filled and submitted.

@@ -1,0 +1,9 @@
+feature,permutation_ap_drop_mean,permutation_ap_drop_std,impurity_importance
+air_temperature_k,0.4615,0.0212,0.0539
+process_temperature_k,0.2993,0.0217,0.0364
+rotational_speed_rpm,0.4277,0.0172,0.1706
+torque_nm,0.7011,0.007,0.1564
+tool_wear_min,0.3437,0.0188,0.1277
+temperature_difference_k,,,0.1355
+power_w,,,0.1803
+wear_torque_min_nm,,,0.1394

@@ -349,6 +349,38 @@ class TestManufacturingPipeline(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_unseen_ai4i(str(bad_sample), str(RAW_CSV_PATH))
 
+    def test_report_writes_every_artifact(self):
+        """src/report.py must write each EDA and evaluation file, with results matching the saved model."""
+        from src.report import write_reports
+
+        with tempfile.TemporaryDirectory() as tmp:
+            written = write_reports(
+                out_dir=tmp,
+                data_path=str(REPO_ROOT / "manufacturing_samples.csv"),
+                model_path=str(REPO_ROOT / "models" / "defect_pipeline.joblib"),
+                n_repeats=1,
+            )
+            names = sorted(Path(p).name for p in written)
+            self.assertListEqual(names, sorted([
+                "eda_sensor_distributions.png", "eda_failure_rules.png", "confusion_matrix.png",
+                "classification_report.txt", "feature_importance.png", "feature_importance.csv", "metrics.json",
+            ]))
+            for path in written:
+                self.assertGreater(Path(path).stat().st_size, 0)
+
+            # Sets must match the documented splits: 800 train and 200 test rows, plus the 9,000 unseen rows.
+            import json
+            metrics = json.loads((Path(tmp) / "metrics.json").read_text())
+            self.assertEqual({k: v["rows"] for k, v in metrics["sets"].items()}, {"train": 800, "test": 200, "unseen": 9000})
+            self.assertEqual(metrics["sets"]["test"]["confusion_matrix"], [[169, 1], [4, 26]])
+            self.assertEqual(metrics["sets"]["unseen"]["confusion_matrix"], [[8602, 209], [20, 169]])
+
+            report = (Path(tmp) / "classification_report.txt").read_text()
+            self.assertIn("Unseen UCI rows (n = 9,000, 189 failures)", report)
+            importance = pd.read_csv(Path(tmp) / "feature_importance.csv", index_col="feature")
+            self.assertEqual(len(importance), 8)
+            self.assertAlmostEqual(importance["impurity_importance"].sum(), 1.0, places=3)
+
     def test_tracked_model_loads_and_predicts(self):
         """The committed model must work under the pinned versions, on the Track 1 features."""
         pipe = load_model(str(REPO_ROOT / "models" / "defect_pipeline.joblib"))
